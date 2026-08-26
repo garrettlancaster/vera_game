@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cube World — a tiny voxel game</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛏️</text></svg>" />
+<style>
+   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0b1420; }
+   canvas { display: block; }
+
+   /* Crosshair */
+   #crosshair {
+     position: fixed; left: 50%; top: 50%; width: 22px; height: 22px;
+     transform: translate(-50%, -50%); pointer-events: none; z-index: 10;
+     display: none;
+   }
+   body.locked #crosshair { display: block; }
+   #crosshair::before, #crosshair::after {
+     content: ""; position: absolute; background: rgba(255,255,255,.9);
+     mix-blend-mode: difference; border-radius: 1px;
+   }
+   #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; transform: translateX(-50%); }
+   #crosshair::after  { top: 50%; left: 0; height: 2px; width: 100%; transform: translateY(-50%); }
+
+   /* Debug HUD */
+   #debug {
+     position: fixed; top: 14px; left: 16px; z-index: 10; pointer-events: none;
+     color: rgba(255,255,255,.8); font-family: Consolas, "Courier New", monospace;
+     font-size: 11px; line-height: 1.5; white-space: pre;
+     text-shadow: 0 1px 3px rgba(0,0,0,.6); user-select: none;
+   }
+
+   /* Hotbar */
+   #hotbarWrap { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 10; text-align: center; pointer-events: none; }
+   #selname { color: rgba(255,255,255,.9); font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px; margin-bottom: 7px; min-height: 14px; text-shadow: 0 1px 2px rgba(0,0,0,.6); opacity: .95; transition: transform .12s ease, opacity .12s ease; }
+   #selname.pop { transform: translateY(-4px) scale(1.08); }
+   /* vitals row: hearts on the left, hunger on the right, hugging the hotbar */
+   #vitals { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 9px; width: 100%; }
+   #hotbar { display: inline-flex; gap: 5px; padding: 6px; background: rgba(10,14,22,.38); border-radius: 10px; backdrop-filter: blur(3px); }
+   .slot {
+     position: relative; width: 54px; height: 54px; border-radius: 7px;
+     background: rgba(255,255,255,.08); border: 2px solid rgba(0,0,0,.55);
+     box-shadow: inset 0 0 6px rgba(0,0,0,.35);
+     display: flex; align-items: center; justify-content: center;
+     transition: transform .1s ease, border-color .1s ease, background .1s ease;
+   }
+   .slot canvas { width: 38px; height: 38px; image-rendering: pixelated; }
+   .slot .num { position: absolute; right: 4px; bottom: 2px; font-size: 9px; color: rgba(255,255,255,.6); font-family: monospace; }
+   .slot.selected { border-color: #fff; background: rgba(255,255,255,.18); transform: translateY(-4px); box-shadow: 0 3px 10px rgba(0,0,0,.35), inset 0 0 6px rgba(0,0,0,.2); }
+   .slot .count { position: absolute; left: 50%; bottom: -2px; transform: translateX(-50%); font-family: "Segoe UI", system-ui, sans-serif; font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.9), 0 0 4px rgba(0,0,0,.6); pointer-events: none; }
+
+   /* Hearts (left) + hunger (right) */
+   #hearts { display: flex; gap: 3px; align-items: center; margin-left: 3px; }
+   #hearts canvas { width: 16px; height: 13px; image-rendering: pixelated; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+   #hunger { display: flex; gap: 3px; align-items: center; }
+   #hunger canvas { width: 16px; height: 14px; image-rendering: pixelated; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+  #oxygenrow { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; margin-right: 3px; }
+  #oxygen { display: none; gap: 3px; align-items: center; width: 100%; justify-content: flex-end; } /* shown only while submerged */
+  #oxygen.show { display: flex; }
+  #oxygen canvas { width: 16px; height: 14px; image-rendering: pixelated; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+   #hurt { position: fixed; inset: 0; z-index: 15; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(255,60,40,.05) 45%, rgba(200,15,8,.5) 100%); }
+   #deadmsg { position: fixed; left: 50%; top: 36%; transform: translate(-50%, -50%); z-index: 16; pointer-events: none; font-family: "Segoe UI", system-ui, sans-serif; font-size: 34px; font-weight: 700; letter-spacing: .12em; color: #ff4b40; text-shadow: 0 2px 10px rgba(0,0,0,.8); opacity: 0; }
+   #deadmsg.show { animation: deadfade 2.6s ease forwards; }
+   @keyframes deadfade { 0% { opacity: 0; transform: translate(-50%, -46%) scale(.96); } 12% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 70% { opacity: 1; } 100% { opacity: 0; } }
+
+   /* Click-to-play overlay */
+   #overlay {
+     position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column;
+     align-items: center; justify-content: center; cursor: pointer;
+     background: radial-gradient(ellipse at center, rgba(10,20,40,.15) 0%, rgba(8,14,28,.62) 100%);
+     transition: opacity .3s ease; font-family: "Segoe UI", system-ui, sans-serif; color: #fff;
+   }
+   body.locked #overlay { opacity: 0; pointer-events: none; }
+   #overlay h1 { margin: 0 0 6px; font-size: 42px; letter-spacing: .18em; text-transform: uppercase; font-weight: 700; text-shadow: 0 3px 14px rgba(0,0,0,.5); }
+   #overlay h2 { margin: 0 0 26px; font-size: 14px; font-weight: 400; letter-spacing: .3em; opacity: .75; text-transform: uppercase; }
+   #overlay .cta {
+     padding: 12px 30px; border: 2px solid rgba(255,255,255,.8); border-radius: 8px;
+     font-size: 16px; letter-spacing: .06em; background: rgba(255,255,255,.1); margin-bottom: 30px;
+     animation: pulse 2s ease-in-out infinite;
+   }
+   @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,255,255,.25);} 50% { box-shadow: 0 0 0 8px rgba(255,255,255,0);} }
+   #overlay .controls { display: grid; grid-template-columns: auto auto; gap: 6px 18px; font-size: 13.5px; opacity: .9; }
+   #overlay .controls b { font-weight: 600; text-align: right; background: rgba(255,255,255,.14); padding: 2px 8px; border-radius: 4px; font-family: monospace; font-size: 12px; white-space: nowrap; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+   <div id="debug"></div>
+   <div id="crosshair"></div>
+
+   <div id="hurt"></div>
+   <div id="deadmsg">YOU DIED</div>
+
+   <div id="hotbarWrap">
+     <div id="selname">&nbsp;</div>
+     <div id="vitals">
+       <div id="hearts"></div>
+       <div id="oxygenrow"><div id="oxygen"></div>
+      <div id="hunger"></div></div>
+     </div>
+     <div id="hotbar"></div>
+   </div>
+
+   <div id="overlay">
+     <h1>Cube World</h1>
+     <h2>a tiny voxel sandbox</h2>
+     <div class="cta">Click to play</div>
+     <div class="controls">
+       <b>W A S D</b><span>move</span>
+       <b>Space</b><span>jump</span>
+       <b>Shift</b><span>sprint</span>
+       <b>Left click</b><span>break block</span>
+       <b>Right click</b><span>place from hand</span>
+       <b>1–8 / Wheel</b><span>select hotbar slot</span>
+       <b>Esc</b><span>release mouse</span>
+     </div>
+   </div>
+
+   <script type="module" src="./game.js"></script>
+</body>
+</html>
