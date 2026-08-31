@@ -5,6 +5,7 @@ import SFX from './sounds.js';
 const W = 960, D = 960, H = 28;      // world size (x, z, height) — 2.5x the old map
 const CH = 32;                       // region size along x/z (edited regions are rebuilt as a whole)
 const AIR = 0, GRASS = 1, DIRT = 2, STONE = 3, WOOD = 4, LEAVES = 5, SAND = 6, WATER = 7, MEAT = 8, CACTUS = 9, TALL_GRASS = 10;
+const RANGE_ROD = 11;   // handheld surveyor tool (given by an NPC, used to measure distance & height)
 const WL = 6;                        // water level — water fills y <= WL where terrain is lower
 
 // player
@@ -305,9 +306,19 @@ const texCanvases = {
   sand:      makeTex(() => vary([221, 208, 162], 11)),
   water:     makeTex(() => vary([52, 108, 196], 14)),
   meat:      makeTex((x, y) => { const m = (Math.sin(x * 2.3 + y * 1.7) > 0.5); return vary(m ? [196, 74, 58] : [214, 120, 96], 12); }),
-  cactus:    makeTex((x, y) => { if (rnd() < 0.07) return vary([216, 234, 200], 8);   // pale spine fleck
-                     const band = (Math.sin(x * Math.PI / 2.5) > 0.15);             // vertical ribbing like a real cactus
+  cactus:    makeTex((x, y) => { if (rnd() < 0.07) return vary([216, 234, 200], 8);    // pale spine fleck
+                     const band = (Math.sin(x * Math.PI / 2.5) > 0.15);              // vertical ribbing like a real cactus
                      return vary(band ? [86, 164, 70] : [52, 124, 46], 9); }),
+   // Range Rod: a handheld instrument — a dark body with a glowing green readout panel (the hotbar icon)
+  rangeRod:  makeTex((x, y) => {
+    const screen = y >= 3 && y <= 6 && x >= 5 && x <= 10;
+    const head   = y >= 2 && y <= 9 && x >= 3 && x <= 12;
+    const grip   = y >= 10 && y <= 15 && x >= 6 && x <= 9;
+    if (screen) return vary([40, 130, 80], 10);    // glowing LCD readout
+    if (head)   return vary([52, 58, 70], 6);       // dark instrument body
+    if (grip)   return vary([44, 48, 58], 5);       // handle
+    return [0, 0, 0, 0];                            // transparent
+  }),
 };
 
 function toTexture(c) {
@@ -734,11 +745,23 @@ addArmBox(0.26, 0.82, 0.26, 0, 0.70, 0.04, skinMat,   100); // hand (slightly to
 // held item — a block in front of the hand, brighter than world faces (hand items get their own light)
 let heldMesh = null;
 let heldItemId = null;
+// the live "readout screen" of a handheld tool: a tool like the Range Rod draws its
+// reading onto this canvas each frame, so the number lives on the device, not a HUD panel.
+let toolScreenCtx = null, toolScreenTex = null;
+function disposeHeld() {
+  if (!heldMesh) return;
+  armRoot.remove(heldMesh);
+  if (heldMesh.geometry) heldMesh.geometry.dispose();
+  else for (const ch of heldMesh.children) { if (ch.geometry) ch.geometry.dispose(); if (ch.material && ch.material.map) ch.material.map.dispose(); }
+  heldMesh = null; toolScreenCtx = null; toolScreenTex = null;
+}
 function setHeldItem(id) {
-  if (id === heldItemId) return;            // no-op (also covers empty hand -> empty hand)
+  if (id === heldItemId) return;             // no-op (also covers empty hand -> empty hand)
   heldItemId = id;
-  if (heldMesh) { armRoot.remove(heldMesh); heldMesh.geometry.dispose(); heldMesh = null; }
-  if (!id) return;                          // empty hand, nothing to show
+  disposeHeld();
+  if (!id) return;                           // empty hand, nothing to show
+  const info = ITEM_INFO[id];
+  if (info && info.tool) { buildToolMesh(id, info); return; }   // a handheld tool, not a placeable block
   const geo = new THREE.BoxGeometry(0.252, 0.252, 0.252); // 40% smaller than before
   const bright = [0.85, 0.72, 1.0, 0.6, 0.95, 0.8]; // +x -x +y -y +z -z
   const col = new Float32Array(72);
@@ -749,7 +772,25 @@ function setHeldItem(id) {
   heldMesh.renderOrder = 101;
   armRoot.add(heldMesh);
 }
-// survival: the hand starts empty - items only come from what you mine
+// ---- tool pattern: a handheld device the player earns from a helper NPC. The first is the
+// Range Rod (measurement). Future legibility surfaces should follow the same shape — an item
+// tagged `tool: <name>`, a device mesh built here, and an update that acts while it is held.
+function buildToolMesh(id, info) {
+  const g = new THREE.Group();
+  const mat = (c) => new THREE.MeshBasicMaterial({ color: c, fog: false, depthTest: false, depthWrite: false, transparent: true });
+  const part = (w, h, d, x, y, z, m) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); b.renderOrder = 101; g.add(b); return b; };
+  part(0.26, 0.16, 0.30, 0, 0, 0,           mat(0x39404e));   // body
+  part(0.12, 0.24, 0.12, 0, -0.16, 0.03,    mat(0x272c34));   // grip under the body
+  const sc = document.createElement('canvas'); sc.width = sc.height = 32;
+  toolScreenCtx = sc.getContext('2d');
+  toolScreenTex = toTexture(sc);
+  part(0.20, 0.10, 0.03, 0, 0.11, 0.11, new THREE.MeshBasicMaterial({ map: toolScreenTex, fog: false, depthTest: false, depthWrite: false, transparent: true })); // readout screen
+  g.position.set(0.16, 1.30, 0.16);
+  g.renderOrder = 101;
+  heldMesh = g;
+  armRoot.add(g);
+}
+// survival: the hand starts empty - items only come from what you mine (or a helper hands you a tool)
 heldItemId = null;
 
 // ---- arm animation: mining swing, break strike, place poke, walk bob + idle breathing
@@ -794,7 +835,10 @@ function raycastVoxel(origin, dir, maxDist = REACH) {
   let tMaxY = dir.y > 0 ? (y + 1 - origin.y) * tDY : dir.y < 0 ? (origin.y - y) * tDY : Infinity;
   let tMaxZ = dir.z > 0 ? (z + 1 - origin.z) * tDZ : dir.z < 0 ? (origin.z - z) * tDZ : Infinity;
 
-  for (let i = 0; i < 256; i++) {
+    // cap raised 256->1024 so the measure tool's long look (300 blocks) reaches far
+    // terrain; mining uses maxDist=6 and returns via the tMax>maxDist check long before
+    // the cap, so gameplay is unaffected.
+  for (let i = 0; i < 1024; i++) {
     if (tMaxX <= tMaxY && tMaxX <= tMaxZ) {
       if (tMaxX > maxDist) return null;
       const px = x, py = y, pz = z;   // cell we're leaving = placement target
@@ -961,6 +1005,7 @@ const ITEM_INFO = {
   [SAND]:   { name: 'Sand',  tex: 'sand' },
     [MEAT]:   { name: 'Meat',  tex: 'meat', noPlace: true },
     [CACTUS]: { name: 'Cactus', tex: 'cactus' },
+     [RANGE_ROD]: { name: 'Range Rod', tex: 'rangeRod', noPlace: true, tool: 'measure' },
 };
 
 const inventory = new Array(INV_SIZE).fill(null);    // slot -> null | { id, count }
@@ -981,13 +1026,14 @@ function addItem(id, n) {                            // returns true if everythi
   return left === 0;
 }
 
-function removeOneSelected() {                       // one block out of the held slot (placing)
+function removeOneSelected() {                        // one block out of the held slot (placing)
   const st = inventory[selIndex];
   if (!st) return;
   st.count--;
   if (st.count <= 0) inventory[selIndex] = null;
   renderInventory(); updateHeldItem();
 }
+function hasItem(id) { for (const st of inventory) if (st && st.id === id) return true; return false; }
 
 function updateHeldItem() { setHeldItem(inventory[selIndex] ? inventory[selIndex].id : null); }
 
@@ -1497,7 +1543,109 @@ function attackMob() {   // one swing at whatever's being aimed at. true on a hi
   return true;
 }
 
-spawnMobs(60);   // tripled (was 20) — spread across most of the map, kept well apart (see spawnMobs for the anti-crowd rule)
+spawnMobs(60);    // tripled (was 20) — spread across most of the map, kept well apart (see spawnMobs for the anti-crowd rule)
+
+// ============================================================ dialogue caption
+// A single friendly line from a helper NPC (e.g. asking for help). Deliberately minimal —
+// this is the "an NPC needs help" channel, not a dialogue system.
+const dialogEl = document.getElementById('dialogue');
+let dialogT = 0;
+function sayDialog(name, text, ms = 4500) {
+  dialogEl.textContent = name + ': ' + text;
+  dialogEl.classList.add('show');
+  dialogT = ms;
+}
+function updateDialog(dt) {
+  if (dialogT <= 0) return;
+  dialogT -= dt;
+  if (dialogT <= 0) dialogEl.classList.remove('show');
+}
+
+// ============================================================ settler NPCs (helpers, not prey)
+// Friendly characters who live in the world and *need help*. Helping one is how the player
+// earns tools — a math capability becomes an object you acquire by assisting a stranger,
+// never a feature handed to you. Each settler asks a small, concrete favour.
+const NPCS = [];
+function makeSettlerMesh() {
+  const g = new THREE.Group();
+  const box = (w, h, d, x, y, z, c) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ color: c }));
+    m.position.set(x, y, z); g.add(m); return m;
+   };
+   // a small human-sized figure in warm "settler" colours, with a hip satchel
+  box(0.30, 0.40, 0.18, 0,      0.52, 0,    0x7a5a3a);   // torso / tunic
+  box(0.24, 0.24, 0.24, 0,      0.86, 0,    0xe0b48a);   // head
+  box(0.10, 0.30, 0.10, -0.22, 0.55, 0,   0x5f4630);   // left arm
+  box(0.10, 0.30, 0.10,  0.22, 0.55, 0,   0x5f4630);   // right arm
+  box(0.12, 0.42, 0.12, -0.09, 0.18, 0,   0x33333d);   // left leg
+  box(0.12, 0.42, 0.12,  0.09, 0.18, 0,   0x33333d);   // right leg
+  box(0.34, 0.14, 0.10,  0.04, 0.55, 0.14, 0x8a6a3a);  // satchel at the hip
+  g.scale.setScalar(0.92);
+  return g;
+}
+function addSettler(x, y, z, name, task) {
+  const g = makeSettlerMesh();
+  g.position.set(x, y, z);
+  scene.add(g);
+  NPCS.push({ name, task, pos: new THREE.Vector3(x, y, z), group: g, helped: false, spoke: false, faceYaw: Math.random() * 6.28, bobT: Math.random() * 3 });
+}
+function spawnSettlers() {
+    // one settler a short walk from spawn so the player meets the "help a stranger" pattern early
+  for (let k = 0; k < 12; k++) {
+    const a = k / 12 * Math.PI * 2;
+    const tx = Math.floor(spawnXZ[0] + Math.cos(a) * 15), tz = Math.floor(spawnXZ[1] + Math.sin(a) * 15);
+    if (!inBounds(tx, 3, tz)) continue;
+    const hgt = topSolidY(tx, tz);
+    if (hgt < WL + 1) continue;
+    const surf = blockAt(tx, hgt, tz);
+    if (surf !== GRASS && surf !== DIRT && surf !== SAND) continue;
+    addSettler(tx + 0.5, hgt + 1 + 0.02, tz + 0.5, 'Pip', 'measure');
+    return;     // one settler for now; more as more tools exist
+   }
+}
+function targetedNPC() {
+  camera.getWorldDirection(_mv);
+  let best = null, bestT = Infinity;
+  for (const n of NPCS) {
+    const cx = n.pos.x - camera.position.x, cy = n.pos.y + 0.8 - camera.position.y, cz = n.pos.z - camera.position.z;
+    const dist = Math.hypot(cx, cy, cz);
+    if (dist > 5 || dist < 0.01) continue;
+    const dot = (cx * _mv.x + cy * _mv.y + cz * _mv.z) / dist;
+    if (dist * Math.sqrt(Math.max(0, 1 - dot * dot)) > 0.7) continue;
+    const tproj = cx * _mv.x + cy * _mv.y + cz * _mv.z;
+    if (tproj < bestT) { bestT = tproj; best = n; }
+   }
+  return best;
+}
+function interactNPC() {
+  const n = targetedNPC();
+  if (!n) return false;
+  if (!n.helped) {
+    if (!hasItem(RANGE_ROD)) addItem(RANGE_ROD, 1);       // the favour, granted: the tool is yours
+    sayDialog(n.name, 'Thank you — that ridge is far. Take my range rod; it suits steady hands.');
+    n.helped = true;
+    triggerArmSwing('place');
+   }
+  return true;     // consume the click so it doesn't swing a weapon through the NPC
+}
+function updateNPCs(dt) {
+  for (const n of NPCS) {
+    n.bobT += dt;
+    const bob = Math.sin(n.bobT * 1.4) * 0.03;
+    n.group.position.set(n.pos.x, n.pos.y + bob, n.pos.z);
+    const dx = player.pos.x - n.pos.x, dz = player.pos.z - n.pos.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 16) {
+      const target = Math.atan2(dx, dz);
+      let dyaw = ((target - n.faceYaw + Math.PI) % (Math.PI * 2)) - Math.PI;
+      n.faceYaw += dyaw * Math.min(1, dt * 4);
+      n.group.rotation.y = n.faceYaw;
+     }
+      // ask for the favour once, when the player first comes close
+    if (!n.helped && !n.spoke && dist < 7) { sayDialog(n.name, 'I have shaky hands — can you measure that ridge for me?'); n.spoke = true; }
+   }
+}
+spawnSettlers();
 
 const mouseState = { left: false, right: false, lastAct: 0, lastAttack: 0 };
 
@@ -1645,7 +1793,10 @@ function stepPhysics(dt) {
 function heldActions() {
   if (!locked) return;
   const now = performance.now();
-  if (mouseState.left && now - mouseState.lastAttack > 300) { if (attackMob()) mouseState.lastAttack = now; }   // hold to keep swinging at a mob
+  if (mouseState.left && now - mouseState.lastAttack > 300) {
+    if (interactNPC()) mouseState.lastAttack = now;               // talking to a helper NPC, not attacking
+    else if (attackMob()) mouseState.lastAttack = now;            // hold to keep swinging at a mob
+   }
   if (mouseState.right && now - mouseState.lastAct > 240) tryAct(2, now);
 }
 
@@ -1672,6 +1823,72 @@ function updateDebug(dt) {
     `pos: ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}
 ` +
     `dir: ${dir} ${bearing.toFixed(0)}Â°  pitch ${pitchDeg >= 0 ? '+' : ''}${pitchDeg.toFixed(0)}Â°`;
+}
+
+// ============================================================ range rod (legibility, via a tool)
+// The first "math is in the world" surface — but it's a *tool you earn*, not a HUD you're
+// handed. Holding the Range Rod (selected in the hotbar) reads the distance and vertical
+// scale of the world, magnitude-rounded: a long way across the map reads in tens, not to
+// the block, because precision at that scale is an illusion and the point is number sense,
+// not an exact answer. The reading is drawn on the rod's screen and echoed in a small panel.
+const measureEl = document.getElementById('measure');
+
+// magnitude-aware rounding: small distances read exactly, large ones coarser
+function rough(n) {
+  const a = Math.abs(n);
+  if (a < 10)  return Math.round(n);
+  if (a < 100) return Math.round(n / 5) * 5;
+  if (a < 500) return Math.round(n / 10) * 10;
+  return Math.round(n / 25) * 25;
+}
+// a plain magnitude word, so the reading is a *feel*, not just a figure
+function rangeBand(n) {
+  const a = Math.abs(n);
+  if (a < 6)   return 'next to you';
+  if (a < 20)  return 'a short way off';
+  if (a < 60)  return 'a long way';
+  if (a < 200) return 'across the map';
+  return 'far beyond sight';
+}
+
+// draw the rod's LCD: a couple of "LED bars" for the range magnitude (visual — the panel
+// holds the legible figures). Called every frame the rod is held.
+function paintToolScreen(range, rise) {
+  if (!toolScreenCtx) return;
+  const g = toolScreenCtx;
+  g.fillStyle = '#04140c'; g.fillRect(0, 0, 32, 32);
+  g.fillStyle = '#39d97a';
+  const mag = range == null ? 0 : Math.max(0.06, Math.min(1, rough(range) / 200));
+  g.fillRect(3, 7, 26 * mag, 4);
+  if (rise != null) {
+    const rr = Math.max(0, Math.min(1, (rise + 20) / 40));
+    g.fillRect(3, 23, 26 * rr, 4);
+   }
+  toolScreenTex.needsUpdate = true;
+}
+function updateMeasure(dt) {
+  const rodHeld = !!inventory[selIndex] && inventory[selIndex].id === RANGE_ROD;
+  if (!rodHeld || !locked) { measureEl.classList.toggle('show', false); return; }
+  measureEl.classList.add('show');
+
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+    // look far out: the rod is about the world, not the 6-block mining reach
+  const hit = raycastVoxel(camera.position, dir, 300);
+  const feetLevel = topSolidY(Math.floor(camera.position.x), Math.floor(camera.position.z));
+
+  let range = null, rise = null;
+  if (hit) {
+    const tx = hit.x + 0.5, ty = hit.y + 0.5, tz = hit.z + 0.5;      // block face you're looking at
+    range = Math.hypot(tx - camera.position.x, ty - camera.position.y, tz - camera.position.z);
+    rise    = topSolidY(hit.x, hit.z) - feetLevel;                   // vertical magnitude vs. where you stand
+   }
+  paintToolScreen(range, rise);
+  const r = rise == null ? null : rough(rise);
+  let out = 'RANGE ROD';
+  out += '\nrange    ' + (range == null ? 'open space' : '~' + rough(range) + '    ' + rangeBand(range));
+  out += '\nheight   ' + (r == null ? '—' : r === 0 ? 'level' : (r > 0 ? '+' : '−') + Math.abs(r) + (r > 0 ? ' up' : ' down'));
+  measureEl.textContent = out;
 }
 
 // ---- cacti hurt like vanilla: one heart per touch, plus a shove/hop out of them
@@ -1714,13 +1931,16 @@ function animate() {
   stepPhysics(dt);
   cactusTick();
   heldActions();
-  if (targetedMob()) mining = null;   // don't crack the block you're swinging at over a mob
+  if (targetedMob() || targetedNPC()) mining = null;    // don't crack the block you're swinging at over a mob/NPC
   updateMobs(dt);
+  updateNPCs(dt);
   updateMining(dt);
   updateArm(dt);
   updateDrops(dt);
   updateHurtFlash(dt); updateOxygen(dt); updateEat(dt); updateHunger(dt);
   updateDebug(dt);
+  updateMeasure(dt);
+  updateDialog(dt);
 
   for (const cl of cloudGroup.children) {         // drift the clouds and wrap them around
     cl.position.x += dt * 1.6;
