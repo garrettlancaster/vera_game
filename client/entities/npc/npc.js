@@ -5,6 +5,7 @@ import { player } from '../../player/player.js';
 import { triggerArmSwing } from '../../player/arm.js';
 import { hasItem, addItem } from '../../inventory/inventory.js';
 import { sayDialog } from './dialogue.js';
+import { rough, rangeBand, measureState } from '../../inventory/tools/range-rod.js';
 
 // ============================================================ settler NPCs (helpers, not prey)
 // Friendly characters who live in the world and *need help*. Helping one is how the player
@@ -37,11 +38,34 @@ function makeSettlerMesh() {
   g.scale.setScalar(0.92);
   return g;
 }
-function addSettler(x, y, z, name, task) {
+// Search a ring around a candidate spot for a real nearby high point — a hill or ridge
+// the terrain generator's "small mountains" pass (core/voxel-grid.js's heightAt) actually
+// built — so Pip's "that ridge" refers to something the player can see and walk to, not
+// an arbitrary unlabeled direction. Returns null if nothing meaningfully higher is nearby
+// within the search radius (flat spawn area); callers fall back to generic phrasing.
+const RIDGE_SEARCH_RADIUS = 48, RIDGE_SEARCH_STEP = 4, RIDGE_MIN_RISE = 6;
+function findNearbyRidge(cx, cz, baseH) {
+  let best = null, bestH = baseH + RIDGE_MIN_RISE - 1;
+  for (let dz = -RIDGE_SEARCH_RADIUS; dz <= RIDGE_SEARCH_RADIUS; dz += RIDGE_SEARCH_STEP) {
+    for (let dx = -RIDGE_SEARCH_RADIUS; dx <= RIDGE_SEARCH_RADIUS; dx += RIDGE_SEARCH_STEP) {
+      const x = cx + dx, z = cz + dz;
+      if (!inBounds(x, 3, z)) continue;
+      const h = topSolidY(x, z);
+      if (h > bestH) { bestH = h; best = { x, z }; }
+    }
+  }
+  return best;
+}
+
+function addSettler(x, y, z, name, task, landmark) {
   const g = makeSettlerMesh();
   g.position.set(x, y, z);
   scene.add(g);
-  NPCS.push({ name, task, pos: new THREE.Vector3(x, y, z), group: g, helped: false, spoke: false, faceYaw: Math.random() * 6.28, bobT: Math.random() * 3 });
+  // idle-facing points toward the landmark (if there is one) before the player ever gets
+  // close enough to make the NPC turn to face them — a subtle "this is what I mean" cue
+  // instead of a waypoint marker or arrow, which would read as a HUD, not a stranger.
+  const faceYaw = landmark ? Math.atan2(landmark.x - x, landmark.z - z) : Math.random() * 6.28;
+  NPCS.push({ name, task, pos: new THREE.Vector3(x, y, z), group: g, landmark, helped: false, spoke: false, reported: false, nudged: false, faceYaw, bobT: Math.random() * 3 });
 }
 // spawnXZ is passed in rather than imported, same as entities/mobs.js's spawnMobs — see
 // IMPLEMENTATION_PLAN.md's Slice A log.
@@ -55,7 +79,8 @@ export function spawnSettlers(spawnXZ) {
     if (hgt < WL + 1) continue;
     const surf = blockAt(tx, hgt, tz);
     if (surf !== GRASS && surf !== DIRT && surf !== SAND) continue;
-    addSettler(tx + 0.5, hgt + 1 + 0.02, tz + 0.5, 'Pip', 'measure');
+    const landmark = findNearbyRidge(tx, tz, hgt);
+    addSettler(tx + 0.5, hgt + 1 + 0.02, tz + 0.5, 'Pip', 'measure', landmark);
     return;     // one settler for now; more as more tools exist
    }
 }
@@ -78,9 +103,27 @@ export function interactNPC() {
   if (!n) return false;
   if (!n.helped) {
     if (!hasItem(RANGE_ROD)) addItem(RANGE_ROD, 1);       // the favour, granted: the tool is yours
-    sayDialog(n.name, 'Thank you — that ridge is far. Take my range rod; it suits steady hands.');
+    // Granting the rod is not "thanks, you're done" — nothing has been measured yet. The
+    // ask and the report-back are two separate beats, closed below once the rod has
+    // actually been pointed at something (see range-rod.js's measureState).
+    sayDialog(n.name, n.landmark
+      ? 'My hands shake too much these days — take the rod, get a read on that rise, and come tell me what you find.'
+      : 'My hands shake too much these days — take the rod and get a read on something far off; come tell me what you find.');
     n.helped = true;
     triggerArmSwing('place');
+    return true;
+   }
+  if (!n.reported) {
+    if (measureState.everMeasured) {
+      // Whatever the player actually measured — echoed back, not graded. Per MATH_PLAN.md
+      // §8: no single correct numeric answer, no "wrong" reading.
+      const r = rough(measureState.lastRange);
+      sayDialog(n.name, `So it's about ${r}, ${rangeBand(measureState.lastRange)} — that's exactly what I needed. Thank you.`);
+      n.reported = true;
+    } else if (!n.nudged) {
+      sayDialog(n.name, "Still no word? Aim the rod at something out there — its screen will show you.");
+      n.nudged = true;
+    }
    }
   return true;     // consume the click so it doesn't swing a weapon through the NPC
 }
@@ -98,6 +141,11 @@ export function updateNPCs(dt) {
       n.group.rotation.y = n.faceYaw;
      }
       // ask for the favour once, when the player first comes close
-    if (!n.helped && !n.spoke && dist < 7) { sayDialog(n.name, 'I have shaky hands — can you measure that ridge for me?'); n.spoke = true; }
+    if (!n.helped && !n.spoke && dist < 7) {
+      sayDialog(n.name, n.landmark
+        ? 'I have shaky hands — see that rise off yonder? I need to know how far it is.'
+        : "I have shaky hands — I need to know how far off things are, and my eyes aren't what they used to be.");
+      n.spoke = true;
+    }
    }
 }

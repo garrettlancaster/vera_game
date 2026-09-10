@@ -205,6 +205,32 @@ diagnostics on `game.js`/`index.html`; served over `node server.mjs`, root and
 check (device orientation, screen legibility, NPC placement) — there is no browser
 here.
 
+**Follow-up (post-Slice A): the favour had no real target and no way to close.**
+User-reported gap after Slice A's refactor: Pip's line said "measure that ridge for
+me," but Pip spawned at any dry patch within 15 blocks of the player's own spawn —
+there was no actual ridge nearby to look at — and the grant line said "Thank you"
+*immediately* on the first click, before anything had been measured, so there was
+never a real ask-then-answer loop, just a tool handed over with a dialogue line that
+implied one. Fixed in `client/entities/npc/npc.js` and
+`client/inventory/tools/range-rod.js`:
+- `spawnSettlers()` now searches a 48-block ring around Pip's candidate spot
+  (`findNearbyRidge`) for a real point at least 6 blocks higher — an actual hill the
+  terrain generator built — and, if found, orients Pip's idle stance to face it (an
+  environmental cue, not a waypoint marker/arrow, which would read as a HUD). Verified
+  against this world's real seed: for the current spawn, it finds a landmark 12 blocks
+  higher, ~40 blocks off. Falls back to generic phrasing ("something far off") if no
+  landmark turns up within the search radius.
+- The grant line no longer says "thank you" for a favour not yet done. `range-rod.js`
+  now tracks `measureState` (has the player ever gotten a reading of 15+ blocks — "a
+  short way off" or farther, ruling out a trivial glance at nearby ground); `interactNPC()`
+  checks it on a second interaction and, once true, has Pip react to *whatever the
+  player measured*, magnitude-rounded and phrased in words, exactly as already shown on
+  the rod's own screen — never validated against "the right answer," per `MATH_PLAN.md`
+  §8's ban on a single correct numeric answer. A gentle one-time nudge ("aim the rod at
+  something out there") covers the case where the player hasn't tried the rod yet.
+- No new UI: the "answer" is the same reading already on the rod's screen, and
+  "providing" it is walking back and interacting again — no typed input, no menu.
+
 ---
 
 ## Slice 2 — "stock" & "rate" readouts  *(next, client-only)*

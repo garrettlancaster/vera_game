@@ -47,6 +47,15 @@ function paintToolScreen(range, rise) {
 }
 
 let lastReading = { range: null, rise: null };
+// Whether the player has ever gotten a real, meaningful reading (not just glancing at a
+// block underfoot) — Pip's follow-up line in entities/npc/npc.js uses this to know the
+// player actually tried the rod, without any "submit an answer" UI: the report-back *is*
+// the next conversation, echoing back whatever the player saw (see IMPLEMENTATION_PLAN.md's
+// Slice A follow-up log for why — a typed/exact answer would break MATH_PLAN.md §8's "no
+// single correct numeric answer" rule).
+export const measureState = { everMeasured: false, lastRange: null, lastRise: null };
+const REPORTABLE_MIN_RANGE = 15;   // "a short way off" or farther — rules out a trivial glance at nearby ground
+
 function onUpdate() {
   const dir = new THREE.Vector3();
   camera.getWorldDirection(dir);
@@ -61,6 +70,11 @@ function onUpdate() {
     rise    = topSolidY(hit.x, hit.z) - feetLevel;                   // vertical magnitude vs. where you stand
    }
   lastReading = { range, rise };
+  if (range != null && range >= REPORTABLE_MIN_RANGE) {
+    measureState.everMeasured = true;
+    measureState.lastRange = range;
+    measureState.lastRise = rise;
+  }
   paintToolScreen(range, rise);
 }
 
