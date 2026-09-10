@@ -182,13 +182,22 @@ the strict layering direction above not holding exactly (`physics.js` →
 `stats.js` → `inventory.js`, and an `inventory.js` ↔ `player/arm.js`
 circular import, both safe and both explained); no separate `input.js`
 (raw DOM listeners split between `player.js` and `main.js` by whether they
-touch other layers); `quest-data.js` deliberately deferred to Slice 3;
-`aabbOverlapsCell` filed under `placing.js` not `mining.js`. Full reasoning
-for each is in `IMPLEMENTATION_PLAN.md`'s Slice A log — read it alongside
-this table, not instead of it. The takeaway for whoever extends this next:
-treat "core/physics/voxel-grid never import upward" as the one hard rule,
-and expect the rest to bend to what the code actually needs, the same way
-it already did once.
+touch other layers); `aabbOverlapsCell` filed under `placing.js` not
+`mining.js`. Full reasoning for each is in `IMPLEMENTATION_PLAN.md`'s
+Slice A log — read it alongside this table, not instead of it. The
+takeaway for whoever extends this next: treat "core/physics/voxel-grid
+never import upward" as the one hard rule, and expect the rest to bend to
+what the code actually needs, the same way it already did once.
+
+**Second amendment:** `quest-data.js` (§5, below) was initially deferred to
+"Slice 3" as a client-only convenience — Pip and Wren shipped as hand-rolled
+code in `npc.js` instead. That was a mistake, not a phased rollout: without
+the data/engine split, every new settler beat became another bespoke branch
+in `npc.js` (a landmark check for one settler, a report-back state machine
+for another), which is exactly the un-scalable shape §5 exists to prevent.
+`quest-data.js` is now real (see §5) and `npc.js` is the generic engine
+described there — built as soon as the deferral's cost became visible, not
+held for a later slice. Treat §5 as current, not aspirational.
 
 ---
 
@@ -233,40 +242,77 @@ Replace the hardcoded body of `spawnSettlers()`/`addSettler()` with data
 matching `STORYLINE.md §3` and §5, so adding a settler context is a data
 change, not a code change.
 
-**Settler definition shape (`quest-data.js`, one entry per `STORYLINE.md §3`
-row):**
+**Settler definition shape — this is the actual shape shipped in
+`client/entities/npc/quest-data.js`, not a sketch; read that file alongside
+this section (one entry per `STORYLINE.md §3` row):**
 
 ```js
 {
-  id: 'pip',                          // stable slug
-  displayName: 'Pip',
-  strandNodes: ['len.select-tool', 'len.unit-size-matters', /* ... */],
-  spawn: { biome: 'ridge', nearSpawnRadius: 15 },  // world-gen placement hint
+  id: 'pip', displayName: 'Pip',
+  spawn: { radius: 15, findLandmark: true, minSep: 0 },  // world-gen placement hint;
+                                                          // findLandmark asks npc.js's
+                                                          // engine to search nearby terrain
+                                                          // and plant a real marker there
   contexts: [                          // ordered; see STORYLINE §5 "Context N"
     {
       id: 'pip.range-rod',             // == the shipped Slice 1 behavior
-      trigger: { type: 'proximity', dist: 7, once: true },
       grantsItem: RANGE_ROD,
-      lines: {
-        approach: 'I have shaky hands — can you measure that ridge for me?',
-        grant: 'Thank you — that ridge is far. Take my range rod; it suits steady hands.',
-      },
       nodeIds: ['len.select-tool', 'len.estimate'],
+      lines: {
+        approach: (n) => n.landmark ? '...references n.landmark...' : '...generic fallback...',
+        grant: (n) => '...',
+      },
     },
-    // further contexts follow the same shape; see STORYLINE.md §5.2 for
-    // Pip's Context 2–4 content to encode next
+    {
+      id: 'pip.report-back',           // a second beat: chained on the first via `trigger`
+      trigger: { type: 'contexts-done', ids: ['pip.range-rod'] },
+      ready: (n) => n.landmark ? n.markerSighted : /* some other real-use signal */ true,
+      track: (n, dt) => { /* runs every frame once this context is current — the
+                              background check that sets n.markerSighted; see quest-data.js */ },
+      nodeIds: ['len.estimate'],
+      lines: {
+        nudge: (n) => '...shown once if the player interacts before ready(n)...',
+        grant: (n) => '...the actual "answer," echoed back, never graded — MATH_PLAN.md §8...',
+      },
+    },
   ],
 }
 ```
 
+`lines.approach`/`lines.nudge`/`lines.grant` and `ready`/`track` are all
+functions of the NPC instance `n` (not plain strings) — every context that
+shipped needed at least one of them to read `n.landmark` or other per-NPC
+state, so the data model takes functions from the start rather than adding
+that later.
+
 **Rules:**
 - `nodeIds` on every context must be a subset of `SKILL_HIERARCHY.md`'s
   table for that settler's strand(s) — this is what makes §7's cross-check
-  script (§9) possible.
-- `trigger` types start with `proximity` (what's shipped) and
-  `item-held` / `task-complete` (needed once contexts chain, e.g. Corwin's
-  Context 3 needs both Context 1 and 2 done first — express that as
-  `trigger: { type: 'contexts-done', ids: ['corwin.sundial', 'corwin.trade'] }`).
+  script (§9) possible. If a context's number doesn't map to a real
+  standard (the Tally Slate's *rate* projection doesn't — see
+  `quest-data.js`'s comment on `wren.tally-slate`), say so in a comment
+  rather than force-fitting a node id.
+- A context with no `trigger` is available the moment every context before
+  it (in array order) is completed — that's how `pip.range-rod` being
+  "first" is expressed, with no explicit trigger object needed.
+- `trigger: { type: 'contexts-done', ids: [...] }` is the one trigger type
+  actually implemented — chains a context behind others finishing first
+  (`item-held` from the original sketch never turned out to be needed; add
+  it the same way if a future settler requires it).
+- `ready(n)` gates whether interacting actually delivers `lines.grant` —
+  omit it for a context that's ready as soon as it's reached. `lines.nudge`
+  is what plays instead, once, if the player interacts before `ready(n)`
+  is true.
+- `track(n, dt)` is for state that has to accrue in the background,
+  independent of the player standing near the NPC or clicking anything —
+  `pip.report-back`'s `track` is how "pointed the rod at the actual
+  marker, not just anywhere" gets checked continuously. This is also the
+  concrete answer to "does the player have to engage with the tool to
+  progress": `ready(n)` (and by extension `track`) is what makes that true
+  or false — a context with no `ready` and an immediate `grantsItem` is a
+  context nothing gates on tool use, which is the right shape only when
+  the favour truly has no report-back step (Wren's slate: an ongoing
+  readout, not a single measurement to bring back).
 - `lines` stay short, in-character, and — per the non-negotiable rules in
   §0 — never name a math concept. If a line is hard to write without
   naming one, the *context* design is wrong, not the line.

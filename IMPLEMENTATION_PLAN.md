@@ -341,6 +341,48 @@ logic are verified independently, but no automated test in this
 environment walks the player to an NPC and confirms the granted tool's
 `screenText()` output character-for-character. Worth a manual pass.
 
+**Follow-up 3: pointer-lock still flaky, and the rod's favour was gameable.**
+Two more reports after Slice 2, plus an explicit instruction to weight
+`DEV_HANDOFF.md` over this file where they pull in different directions —
+the third fix below is that reprioritization in code, not just words.
+
+1. **Movement still broke intermittently after the Follow-up 2 fix.** That
+   fix moved the `pointerlockchange` listener from `window` to `document`,
+   which is correct per spec, but still depends on the browser actually
+   dispatching the event at all — evidently not reliable enough. Replaced
+   event-driven tracking with a per-frame poll: `player.js`'s new
+   `syncLockState()` reads `document.pointerLockElement` directly and is
+   called first thing in `main.js`'s `animate()`, every frame. At most one
+   frame (~16ms) of staleness, zero dependency on any event firing.
+2. **The rod's favour didn't require reading the rod.** A generic "glanced
+   at anything 15+ blocks away" threshold meant a player could earn the
+   favour's payoff without ever pointing the rod at the thing Pip actually
+   asked about. `range-rod.js`'s `measureState` now exposes the *current
+   hit position*, unconditionally; a settler's `track(n, dt)` context hook
+   (new — see below) checks that position against the settler's own
+   landmark every frame, and only *that* — not a generic distance — makes
+   the report-back deliverable. Aiming anywhere else, however far, no
+   longer counts.
+3. **`quest-data.js` built for real, not deferred again.** Fixing #2 meant
+   adding a third piece of bespoke per-NPC state to `npc.js` (after the
+   landmark search and the report-back state machine) — the exact "another
+   branch in a hand-rolled file" pattern `DEV_HANDOFF.md` §5 exists to
+   prevent, and which had been deferred to "Slice 3" twice now. Built it:
+   `entities/npc/quest-data.js` holds Pip's and Wren's content as ordered
+   `contexts` (`grantsItem`, `nodeIds`, `lines.approach/nudge/grant`,
+   optional `ready`/`track`); `entities/npc/npc.js` is now a generic
+   engine (`currentContext`/`interactNPC`/`updateNPCs`) that knows nothing
+   about either character. `DEV_HANDOFF.md` §5 updated to match the shape
+   actually shipped (functions of the NPC instance, not plain strings —
+   every real context needed to read `n.landmark`) and its "deferred to
+   Slice 3" note corrected.
+
+Verified: `node --check` on every touched file; a full headless-Chromium
+pass with zero console/page errors; an interactive pass with pointer lock
+succeeding; a scripted directional test showing all four WASD keys still
+produce correct, symmetric position deltas after switching to the polling
+approach.
+
 ---
 
 ## Slices 3+ — where Elixir/Phoenix enters

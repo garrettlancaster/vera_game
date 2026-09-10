@@ -41,13 +41,18 @@ function paintToolScreen(range, rise) {
 }
 
 let lastReading = { range: null, rise: null };
-// Whether the player has ever gotten a real, meaningful reading (not just glancing at a
-// block underfoot) — Pip's follow-up line in entities/npc/npc.js uses this to know the
-// player actually tried the rod, without any "submit an answer" UI: the report-back *is*
-// the next conversation, echoing back whatever the player saw (see IMPLEMENTATION_PLAN.md's
-// Slice A follow-up log for why — a typed/exact answer would break MATH_PLAN.md §8's "no
-// single correct numeric answer" rule).
-export const measureState = { everMeasured: false, lastRange: null, lastRise: null };
+// The most recent real reading, unconditionally — including *where* it was pointed
+// (hitX/hitZ, the world column the ray actually landed on). Consumers that only care
+// "did the player ever glance at something far off" use everMeasuredFar/farRange/farRise;
+// consumers that need to know the player was looking at a *specific* place (Pip's marker,
+// in entities/npc/npc.js) compare hitX/hitZ against their own target each frame — a generic
+// distance threshold alone can't tell "aimed at the thing that matters" from "aimed at
+// literally anything while walking around with the rod selected," which was the actual gap
+// a nearby-any-target reading left open (see IMPLEMENTATION_PLAN.md's Slice 2 follow-up).
+export const measureState = {
+  hitX: null, hitZ: null, range: null, rise: null,
+  everMeasuredFar: false, farRange: null, farRise: null,
+};
 const REPORTABLE_MIN_RANGE = 15;   // "a short way off" or farther — rules out a trivial glance at nearby ground
 
 function onUpdate() {
@@ -64,10 +69,14 @@ function onUpdate() {
     rise    = topSolidY(hit.x, hit.z) - feetLevel;                   // vertical magnitude vs. where you stand
    }
   lastReading = { range, rise };
+  measureState.hitX = hit ? hit.x : null;
+  measureState.hitZ = hit ? hit.z : null;
+  measureState.range = range;
+  measureState.rise = rise;
   if (range != null && range >= REPORTABLE_MIN_RANGE) {
-    measureState.everMeasured = true;
-    measureState.lastRange = range;
-    measureState.lastRise = rise;
+    measureState.everMeasuredFar = true;
+    measureState.farRange = range;
+    measureState.farRise = rise;
   }
   paintToolScreen(range, rise);
 }

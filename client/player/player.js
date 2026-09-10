@@ -50,13 +50,30 @@ export function syncCamera() {
 // *actions* (mining, placing, attacking, inventory selection) are wired in
 // main.js, which is the only module allowed to reach across every layer.
 export const keys = Object.create(null);
-export let locked = false;
-export function setLocked(v) { locked = v; }
+export let locked = false;   // kept in sync every frame by syncLockState(), below
 export const mouseState = { left: false, right: false, lastAct: 0, lastAttack: 0 };
 
 export function clearInput() {
   for (const k of Object.keys(keys)) delete keys[k];
   mouseState.left = false; mouseState.right = false;
+}
+
+// NOTE (bugfix, see IMPLEMENTATION_PLAN.md's Slice A "Follow-up 2"): this used to update
+// `locked` only from a `pointerlockchange` event listener. That event's target is spec'd
+// as `Document`, but which EventTarget actually receives it (and whether it reaches
+// `window`) turned out to vary — verified empirically to silently never fire on `window`
+// in at least one real environment, which left `locked` stuck and broke input entirely.
+// Rather than chase which target is reliable in which browser, syncLockState() below polls
+// the one authoritative source, `document.pointerLockElement`, directly every frame from
+// main.js's animate loop — at most one frame (well under 20ms) of staleness, and no
+// dependency on any event actually firing at all.
+export function syncLockState() {
+  const was = locked;
+  locked = document.pointerLockElement === renderer.domElement;
+  if (locked !== was) {
+    document.body.classList.toggle('locked', locked);
+    if (!locked) clearInput();
+  }
 }
 
 export function initPlayerControls() {
@@ -70,12 +87,6 @@ export function initPlayerControls() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  document.addEventListener('pointerlockchange', () => {
-    locked = document.pointerLockElement === renderer.domElement;
-    document.body.classList.toggle('locked', locked);
-    if (!locked) clearInput();
   });
 
   document.addEventListener('mousemove', e => {

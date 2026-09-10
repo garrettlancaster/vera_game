@@ -22,7 +22,7 @@ import { scene, camera, renderer, skyDome, sun, cloudGroup } from './core/scene.
 import { ensureNearChunks, cullRegions } from './core/chunks.js';
 
 import {
-  findSpawn, createPlayer, syncCamera, keys, locked, mouseState, initPlayerControls,
+  findSpawn, createPlayer, syncCamera, keys, locked, mouseState, initPlayerControls, syncLockState,
 } from './player/player.js';
 import { updateArm, triggerArmSwing } from './player/arm.js';
 import {
@@ -126,6 +126,7 @@ let _wasSubmerged = null;   // tracks whether the eye is in water (toggles blue 
 function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
 
+  syncLockState();   // must run before anything below that reads `locked` — see player.js
   stepPhysics(dt);
   cactusTick();
   heldActions();

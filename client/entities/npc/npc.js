@@ -1,26 +1,21 @@
 import * as THREE from 'three';
-import { GRASS, DIRT, SAND, WOOD, WL, RANGE_ROD, TALLY_SLATE, inBounds, blockAt, setBlockRaw, topSolidY } from '../../core/voxel-grid.js';
+import { GRASS, DIRT, SAND, WOOD, WL, inBounds, blockAt, setBlockRaw, topSolidY } from '../../core/voxel-grid.js';
 import { rebuildAround } from '../../core/chunks.js';
 import { scene, camera } from '../../core/scene.js';
 import { player } from '../../player/player.js';
 import { triggerArmSwing } from '../../player/arm.js';
 import { hasItem, addItem } from '../../inventory/inventory.js';
 import { sayDialog } from './dialogue.js';
-import { rough, rangeBand, measureState } from '../../inventory/tools/range-rod.js';
+import { SETTLERS } from './quest-data.js';
 
 // ============================================================ settler NPCs (helpers, not prey)
 // Friendly characters who live in the world and *need help*. Helping one is how the player
 // earns tools — a math capability becomes an object you acquire by assisting a stranger,
-// never a feature handed to you. Each settler asks a small, concrete favour.
+// never a feature handed to you.
 //
-// NOTE (module-split amendment): this slice keeps spawnSettlers()/interactNPC() as direct
-// code, matching the original exactly — it does NOT yet adopt the data-driven quest-data.js
-// content model from DEV_HANDOFF.md §5. That generalization (settler definitions as data,
-// a trigger evaluator, per-context nodeIds) is Slice 3 work per DEV_HANDOFF.md §8's task
-// table ("Social channel: first NPC who *reasons while doing*" — blocked on character copy).
-// SETTLER_SPECS below is a light, hand-rolled step in that direction (enough to support
-// two settlers without duplicating spawnSettlers/interactNPC per character) — still direct
-// code, not the generalized trigger engine §5 describes.
+// This file is the generic engine per DEV_HANDOFF.md §5: it walks each settler's ordered
+// `contexts` (quest-data.js) and knows nothing about Pip or Wren specifically. Adding a
+// third settler, or a third beat for an existing one, should only ever touch quest-data.js.
 export const NPCS = [];
 const _mv = new THREE.Vector3();   // reused view-direction vector (see entities/mobs.js for the same pattern)
 
@@ -41,11 +36,12 @@ function makeSettlerMesh() {
   g.scale.setScalar(0.92);
   return g;
 }
+
 // Search a ring around a candidate spot for a real nearby high point — a hill or ridge
 // the terrain generator's "small mountains" pass (core/voxel-grid.js's heightAt) actually
-// built — so Pip's "that ridge" refers to something the player can see and walk to, not
-// an arbitrary unlabeled direction. Returns null if nothing meaningfully higher is nearby
-// within the search radius (flat spawn area); callers fall back to generic phrasing.
+// built — so a settler's "that ridge" refers to something the player can see and walk to,
+// not an arbitrary unlabeled direction. Returns null if nothing meaningfully higher is
+// nearby within the search radius (flat spawn area); callers fall back to generic phrasing.
 const RIDGE_SEARCH_RADIUS = 48, RIDGE_SEARCH_STEP = 4, RIDGE_MIN_RISE = 6;
 function findNearbyRidge(cx, cz, baseH) {
   let best = null, bestH = baseH + RIDGE_MIN_RISE - 1;
@@ -71,30 +67,6 @@ function plantMarker(x, z, h) {
   rebuildAround(x, z);
 }
 
-// One entry per settler. `ask`/`grant` take the NPC instance so they can read `n.landmark`
-// (only Pip uses it). `radius`/`minSep` place each settler a plausible distance from spawn
-// without overlapping another settler that's already been placed this call.
-const SETTLER_SPECS = [
-  {
-    name: 'Pip', grantItem: RANGE_ROD, radius: 15, findLandmark: true, minSep: 0,
-    ask: (n) => n.landmark
-      ? "I have shaky hands — see the post I staked on that rise? I'm hoping it's close enough to carry a signal fire, but I can't judge the distance myself anymore."
-      : "I have shaky hands — I need to know how far off things are before I trust a route, and my eyes aren't what they used to be.",
-    grant: (n) => n.landmark
-      ? "Take the rod — line it up on the post I staked and see what you get. If it's close enough, that's our next relay point."
-      : "Take the rod and get a feel for the distances out here — I won't commit to a walk until I know what I'm in for.",
-  },
-  {
-    // Hearth Camp's quartermaster — close to spawn, per STORYLINE.md §3. References Pip by
-    // name for continuity even though the two never actually talk; the player meets Pip
-    // first (Pip spawns closer to the front of the search ring), so this reads as "word
-    // travels fast in a small camp," not a broken reference.
-    name: 'Wren', grantItem: TALLY_SLATE, radius: 8, findLandmark: false, minSep: 10,
-    ask: () => "Pip mentioned you were handy — could you help me keep an eye on the stores? My own count keeps slipping.",
-    grant: () => "Here — take this tally slate. Carry it and it'll keep a running count of what's on you, and how your food's holding out. Saves me asking every time you pass through.",
-  },
-];
-
 function addSettler(x, y, z, spec, landmark) {
   const g = makeSettlerMesh();
   g.position.set(x, y, z);
@@ -104,34 +76,47 @@ function addSettler(x, y, z, spec, landmark) {
   // instead of a waypoint marker or arrow, which would read as a HUD, not a stranger.
   const faceYaw = landmark ? Math.atan2(landmark.x - x, landmark.z - z) : Math.random() * 6.28;
   const n = {
-    name: spec.name, grantItem: spec.grantItem, ask: spec.ask, grant: spec.grant,
-    pos: new THREE.Vector3(x, y, z), group: g, landmark,
-    helped: false, spoke: false, reported: false, nudged: false,
+    spec, name: spec.displayName, pos: new THREE.Vector3(x, y, z), group: g, landmark,
+    completedContexts: new Set(), spokenApproachFor: new Set(), nudgedFor: new Set(),
     faceYaw, bobT: Math.random() * 3,
   };
   NPCS.push(n);
   return n;
 }
+
 // spawnXZ is passed in rather than imported, same as entities/mobs.js's spawnMobs — see
 // IMPLEMENTATION_PLAN.md's Slice A log.
 export function spawnSettlers(spawnXZ) {
-  for (const spec of SETTLER_SPECS) {
+  for (const spec of SETTLERS) {
+    const { radius, findLandmark, minSep } = spec.spawn;
     for (let k = 0; k < 12; k++) {
       const a = k / 12 * Math.PI * 2;
-      const tx = Math.floor(spawnXZ[0] + Math.cos(a) * spec.radius), tz = Math.floor(spawnXZ[1] + Math.sin(a) * spec.radius);
+      const tx = Math.floor(spawnXZ[0] + Math.cos(a) * radius), tz = Math.floor(spawnXZ[1] + Math.sin(a) * radius);
       if (!inBounds(tx, 3, tz)) continue;
       const hgt = topSolidY(tx, tz);
       if (hgt < WL + 1) continue;
       const surf = blockAt(tx, hgt, tz);
       if (surf !== GRASS && surf !== DIRT && surf !== SAND) continue;
-      if (spec.minSep > 0 && NPCS.some(o => Math.hypot(o.pos.x - tx, o.pos.z - tz) < spec.minSep)) continue;
-      const landmark = spec.findLandmark ? findNearbyRidge(tx, tz, hgt) : null;
+      if (minSep > 0 && NPCS.some(o => Math.hypot(o.pos.x - tx, o.pos.z - tz) < minSep)) continue;
+      const landmark = findLandmark ? findNearbyRidge(tx, tz, hgt) : null;
       if (landmark) plantMarker(landmark.x, landmark.z, landmark.h);
       addSettler(tx + 0.5, hgt + 1 + 0.02, tz + 0.5, spec, landmark);
       break;
      }
    }
 }
+
+// The first context this NPC hasn't completed yet, skipping any whose `contexts-done`
+// prerequisite isn't satisfied (there is nothing left to say/do until it is).
+function currentContext(n) {
+  for (const ctx of n.spec.contexts) {
+    if (n.completedContexts.has(ctx.id)) continue;
+    if (ctx.trigger?.type === 'contexts-done' && !ctx.trigger.ids.every(id => n.completedContexts.has(id))) return null;
+    return ctx;
+  }
+  return null;
+}
+
 export function targetedNPC() {
   camera.getWorldDirection(_mv);
   let best = null, bestT = Infinity;
@@ -146,41 +131,27 @@ export function targetedNPC() {
    }
   return best;
 }
+
 export function interactNPC() {
   const n = targetedNPC();
   if (!n) return false;
-  if (!n.helped) {
-    if (!hasItem(n.grantItem)) addItem(n.grantItem, 1);   // the favour, granted: the tool is yours
-    // Granting the tool is not "thanks, you're done" for Pip specifically — nothing has
-    // been measured yet. The ask and the report-back are two separate beats, closed below
-    // once the rod has actually been pointed at something (see range-rod.js's measureState).
-    // Wren's favour has no report-back: the tally slate is an ongoing readout, not a single
-    // measurement to bring back, so granting it *is* the whole favour.
-    sayDialog(n.name, n.grant(n));
-    n.helped = true;
-    triggerArmSwing('place');
+  const ctx = currentContext(n);
+  if (!ctx) return true;                     // nothing left to say or do — consume the click quietly
+  const ready = ctx.ready ? ctx.ready(n) : true;
+  if (!ready) {
+    if (ctx.lines.nudge && !n.nudgedFor.has(ctx.id)) {
+      sayDialog(n.name, ctx.lines.nudge(n));
+      n.nudgedFor.add(ctx.id);
+    }
     return true;
    }
-  if (n.grantItem === RANGE_ROD && !n.reported) {
-    if (measureState.everMeasured) {
-      // Whatever the player actually measured — echoed back, not graded. Per MATH_PLAN.md
-      // §8: no single correct numeric answer, no "wrong" reading. Pip's reaction only
-      // colors the *tone* by magnitude (closer reads as good news for a relay point); it
-      // never tells the player their reading was right or wrong.
-      const band = rangeBand(measureState.lastRange);
-      const r = rough(measureState.lastRange);
-      const close = band === 'next to you' || band === 'a short way off' || band === 'a long way';
-      sayDialog(n.name, close
-        ? `So it's about ${r}, ${band} — well within reach. That'll make a fine relay point. Thank you.`
-        : `About ${r}, ${band} — further than I'd hoped, but better to know now than halfway there. Thank you.`);
-      n.reported = true;
-    } else if (!n.nudged) {
-      sayDialog(n.name, "Still no word? Aim the rod at something out there — its screen will show you.");
-      n.nudged = true;
-    }
-   }
+  if (ctx.grantsItem && !hasItem(ctx.grantsItem)) addItem(ctx.grantsItem, 1);   // the favour, granted: the tool is yours
+  sayDialog(n.name, ctx.lines.grant(n));
+  n.completedContexts.add(ctx.id);
+  triggerArmSwing('place');
   return true;     // consume the click so it doesn't swing a weapon through the NPC
 }
+
 export function updateNPCs(dt) {
   for (const n of NPCS) {
     n.bobT += dt;
@@ -194,7 +165,13 @@ export function updateNPCs(dt) {
       n.faceYaw += dyaw * Math.min(1, dt * 4);
       n.group.rotation.y = n.faceYaw;
      }
-      // ask for the favour once, when the player first comes close
-    if (!n.helped && !n.spoke && dist < 7) { sayDialog(n.name, n.ask(n)); n.spoke = true; }
+
+    const ctx = currentContext(n);
+    if (!ctx) continue;
+    if (ctx.track) ctx.track(n, dt);   // background state (e.g. "has the rod sighted the marker"), independent of proximity
+    if (ctx.lines.approach && !n.spokenApproachFor.has(ctx.id) && dist < (ctx.trigger?.dist ?? 7)) {
+      sayDialog(n.name, ctx.lines.approach(n));
+      n.spokenApproachFor.add(ctx.id);
+    }
    }
 }
