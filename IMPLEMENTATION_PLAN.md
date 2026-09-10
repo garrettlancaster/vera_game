@@ -231,6 +231,53 @@ implied one. Fixed in `client/entities/npc/npc.js` and
 - No new UI: the "answer" is the same reading already on the rod's screen, and
   "providing" it is walking back and interacting again — no typed input, no menu.
 
+**Follow-up 2 (post-Slice A): a movement regression, plus the landmark still
+wasn't legible or motivated.** Three more user reports on the same feature:
+
+1. **Strafing right (and, intermittently, other movement) stopped working.**
+   Root cause: `player.js`'s pointer-lock listener was registered as
+   `window.addEventListener('pointerlockchange', ...)` — copied verbatim from
+   the original `game.js`, which had the same bug. Per spec, `pointerlockchange`
+   fires on `Document`, not `Window`; verified directly (a Playwright test
+   listening on both `window` and `document` around a real lock/unlock cycle
+   recorded 0 events on `window` and 1 on `document`), and confirmed the fix:
+   with the listener moved to `document.addEventListener(...)`, `locked`
+   correctly flips true and all four movement keys (W/A/S/D) produce
+   symmetric, opposite-signed position deltas in a scripted test — before
+   the fix, `locked` never became true at all and *no* key moved the player,
+   which explains why this could read as "some keys work, some don't"
+   depending on what a player happened to try first (and whatever residual
+   motion carried over from a moment the browser's own internal state briefly
+   agreed regardless). One-line fix in `client/player/player.js`.
+2. **The landmark still wasn't clearly marked.** Facing the NPC's idle stance
+   toward it (Follow-up 1) was too subtle to actually find at ~40 blocks in
+   fog. `spawnSettlers()` now plants a real object there: a 5-block bare WOOD
+   post (`plantMarker()`, `client/entities/npc/npc.js`), placed directly into
+   the world with `setBlockRaw` + `rebuildAround` the same way mining/placing
+   already do. A leafless wood column doesn't occur naturally (every tree the
+   generator plants carries a leaf crown — see `core/world-gen.js`'s
+   `plantTree`), so it reads at a glance as "somebody put that there" without
+   a waypoint arrow, minimap ping, or any other HUD element. Verified
+   directly against this world's seed: the post lands as 5 solid WOOD blocks
+   immediately above the ridge's actual terrain surface, with clear air
+   above it.
+3. **No reason was ever given for the ask.** Pip's line was "I need to know
+   how far it is" with no *why*. Rewritten to give a concrete, practical
+   reason tied to `STORYLINE.md`'s premise (the valley's unlit signal towers):
+   Pip staked the post because they're weighing whether that rise is close
+   enough to serve as a relay point, and can't judge the distance themselves.
+   The report-back line's tone now varies with the measured distance (closer
+   reads as good news for a relay, farther as "good to know before I commit
+   to the walk") — flavor reacting to whatever the real number was, still
+   never graded as right or wrong, per the same `MATH_PLAN.md` §8 rule as
+   Follow-up 1.
+
+Verified: `node --check` on both touched files; a full headless-Chromium
+pass with zero console/page errors; the pointer-lock fix isolated to one
+line and confirmed via a scripted before/after position-delta test; the
+marker's block placement confirmed by running `generateWorld()` directly in
+Node against this world's real seed and reading back the placed blocks.
+
 ---
 
 ## Slice 2 — "stock" & "rate" readouts  *(next, client-only)*

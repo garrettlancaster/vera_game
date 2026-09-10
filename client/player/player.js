@@ -72,7 +72,7 @@ export function initPlayerControls() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  window.addEventListener('pointerlockchange', () => {
+  document.addEventListener('pointerlockchange', () => {
     locked = document.pointerLockElement === renderer.domElement;
     document.body.classList.toggle('locked', locked);
     if (!locked) clearInput();

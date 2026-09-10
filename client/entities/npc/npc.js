@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { GRASS, DIRT, SAND, WL, RANGE_ROD, inBounds, blockAt, topSolidY } from '../../core/voxel-grid.js';
+import { GRASS, DIRT, SAND, WOOD, WL, RANGE_ROD, inBounds, blockAt, setBlockRaw, topSolidY } from '../../core/voxel-grid.js';
+import { rebuildAround } from '../../core/chunks.js';
 import { scene, camera } from '../../core/scene.js';
 import { player } from '../../player/player.js';
 import { triggerArmSwing } from '../../player/arm.js';
@@ -51,10 +52,21 @@ function findNearbyRidge(cx, cz, baseH) {
       const x = cx + dx, z = cz + dz;
       if (!inBounds(x, 3, z)) continue;
       const h = topSolidY(x, z);
-      if (h > bestH) { bestH = h; best = { x, z }; }
+      if (h > bestH) { bestH = h; best = { x, z, h }; }
     }
   }
   return best;
+}
+
+// Plant a bare, leafless post on the landmark itself — the terrain generator never builds
+// a bald wood column (its trees always carry a leaf crown), so this reads at a glance as
+// "someone put that there," not as another tree. This is the actual answer to "which rise
+// do you mean": a real object in the world the player can walk to and sight along, not a
+// waypoint arrow or a minimap marker, which would look like a HUD.
+const MARKER_HEIGHT = 5;
+function plantMarker(x, z, h) {
+  for (let i = 1; i <= MARKER_HEIGHT; i++) setBlockRaw(x, h + i, z, WOOD);
+  rebuildAround(x, z);
 }
 
 function addSettler(x, y, z, name, task, landmark) {
@@ -80,6 +92,7 @@ export function spawnSettlers(spawnXZ) {
     const surf = blockAt(tx, hgt, tz);
     if (surf !== GRASS && surf !== DIRT && surf !== SAND) continue;
     const landmark = findNearbyRidge(tx, tz, hgt);
+    if (landmark) plantMarker(landmark.x, landmark.z, landmark.h);
     addSettler(tx + 0.5, hgt + 1 + 0.02, tz + 0.5, 'Pip', 'measure', landmark);
     return;     // one settler for now; more as more tools exist
    }
@@ -107,8 +120,8 @@ export function interactNPC() {
     // ask and the report-back are two separate beats, closed below once the rod has
     // actually been pointed at something (see range-rod.js's measureState).
     sayDialog(n.name, n.landmark
-      ? 'My hands shake too much these days — take the rod, get a read on that rise, and come tell me what you find.'
-      : 'My hands shake too much these days — take the rod and get a read on something far off; come tell me what you find.');
+      ? "Take the rod — line it up on the post I staked and see what you get. If it's close enough, that's our next relay point."
+      : "Take the rod and get a feel for the distances out here — I won't commit to a walk until I know what I'm in for.");
     n.helped = true;
     triggerArmSwing('place');
     return true;
@@ -116,9 +129,15 @@ export function interactNPC() {
   if (!n.reported) {
     if (measureState.everMeasured) {
       // Whatever the player actually measured — echoed back, not graded. Per MATH_PLAN.md
-      // §8: no single correct numeric answer, no "wrong" reading.
+      // §8: no single correct numeric answer, no "wrong" reading. Pip's reaction only
+      // colors the *tone* by magnitude (closer reads as good news for a relay point); it
+      // never tells the player their reading was right or wrong.
+      const band = rangeBand(measureState.lastRange);
       const r = rough(measureState.lastRange);
-      sayDialog(n.name, `So it's about ${r}, ${rangeBand(measureState.lastRange)} — that's exactly what I needed. Thank you.`);
+      const close = band === 'next to you' || band === 'a short way off' || band === 'a long way';
+      sayDialog(n.name, close
+        ? `So it's about ${r}, ${band} — well within reach. That'll make a fine relay point. Thank you.`
+        : `About ${r}, ${band} — further than I'd hoped, but better to know now than halfway there. Thank you.`);
       n.reported = true;
     } else if (!n.nudged) {
       sayDialog(n.name, "Still no word? Aim the rod at something out there — its screen will show you.");
@@ -143,8 +162,8 @@ export function updateNPCs(dt) {
       // ask for the favour once, when the player first comes close
     if (!n.helped && !n.spoke && dist < 7) {
       sayDialog(n.name, n.landmark
-        ? 'I have shaky hands — see that rise off yonder? I need to know how far it is.'
-        : "I have shaky hands — I need to know how far off things are, and my eyes aren't what they used to be.");
+        ? "I have shaky hands — see the post I staked on that rise? I'm hoping it's close enough to carry a signal fire, but I can't judge the distance myself anymore."
+        : "I have shaky hands — I need to know how far off things are before I trust a route, and my eyes aren't what they used to be.");
       n.spoke = true;
     }
    }
