@@ -12,7 +12,8 @@ import { takeDamage, respawnPlayer, health, hungerState } from '../player/stats.
 // closures — documented as a deliberate deviation from the original layering sketch.
 
 // player movement tuning
-const GRAVITY = 26, JUMP_V = 8.4, WALK_SPEED = 4.4, SPRINT_MULT = 1.55;
+export const GRAVITY = 26;   // also used by entities/drops.js for dropped-item fall physics
+const JUMP_V = 8.4, WALK_SPEED = 4.4, SPRINT_MULT = 1.55;
 // swimming (simplified Minecraft): slower horizontal speed in water, weak gravity,
 // Space floats you back to the surface, Shift makes you dive down
 const SWIM_SPEED_MULT = 0.62,   // swim speed vs land walk (vanilla-ish "much slower")
