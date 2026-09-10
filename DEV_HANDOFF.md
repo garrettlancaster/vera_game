@@ -174,6 +174,22 @@ client/
   `physics.js`, stop and reconsider the design — that's a sign the feature
   isn't using the existing tool/quest patterns.
 
+**Amendment, post-Slice A (read this before trusting the layout above
+literally):** implementing this plan surfaced six real gaps/corrections —
+a `core/scene.js` module this table didn't allocate; `stepPhysics`/
+`cactusTick` living in `physics/physics.js` rather than `player/player.js`;
+the strict layering direction above not holding exactly (`physics.js` →
+`stats.js` → `inventory.js`, and an `inventory.js` ↔ `player/arm.js`
+circular import, both safe and both explained); no separate `input.js`
+(raw DOM listeners split between `player.js` and `main.js` by whether they
+touch other layers); `quest-data.js` deliberately deferred to Slice 3;
+`aabbOverlapsCell` filed under `placing.js` not `mining.js`. Full reasoning
+for each is in `IMPLEMENTATION_PLAN.md`'s Slice A log — read it alongside
+this table, not instead of it. The takeaway for whoever extends this next:
+treat "core/physics/voxel-grid never import upward" as the one hard rule,
+and expect the rest to bend to what the code actually needs, the same way
+it already did once.
+
 ---
 
 ## 4. The ToolDevice pattern (generalizing the Range Rod)
