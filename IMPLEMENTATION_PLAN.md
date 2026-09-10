@@ -280,13 +280,66 @@ Node against this world's real seed and reading back the placed blocks.
 
 ---
 
-## Slice 2 — "stock" & "rate" readouts  *(next, client-only)*
+## Slice 2 — "stock" & "rate" readouts  *(done, client-only)*
 
 Turn the opaque HUD into legible quantities, still framed as practical:
 - **Stock:** total blocks / total meat carried (the hotbar as a quantity).
 - **Rate:** a plain-language hunger projection ("food will last a while / running
    low soon"), *not* "hunger = 6.4 / 10."
 Both reuse the `rough()` magnitude style from Slice 1. No server.
+
+**Resolved which pattern (DEV_HANDOFF.md §8's Slice 2 row): a second
+`ToolDevice`, not a HUD-embedded readout.** MATH_PLAN.md §9 and
+IMPLEMENTATION_PLAN's own opening "guiding principle" both say a legibility
+capability is earned from a settler, never handed over as a free HUD
+feature — an always-on readout would contradict that, so this shipped as
+the **Tally Slate**, a second tool through the exact pattern the Range Rod
+established.
+
+**What changed**
+- `client/inventory/tools/tally-slate.js` (new): while held, shows *stock*
+  (total blocks carried, total meat carried, both via `rough()`) and *rate*
+  (a plain-language food projection — "running out fast" / "running low
+  soon" / "holding steady" / "will last a good while" — computed from the
+  player's current hunger level and the *current movement-based drain rate*,
+  never a raw number). Registers itself with the same `tool-device.js`
+  registry the Range Rod uses, with **zero changes to `tool-device.js`'s
+  interface** — direct confirmation the pattern generalizes the way §4
+  intended.
+- `rough()` moved from `range-rod.js` to `tool-device.js` (re-exported from
+  `range-rod.js` for its existing importers) — it's shared ToolDevice
+  infrastructure now, not one tool's private helper.
+- `stats.js`'s hunger state gained two exports (`HUNGER_MAX`, `HUNGER_DRAIN`)
+  and `hungerState` gained a `.level` field (mirroring `hunger` on every
+  change) — the same object-wrapper pattern already used for `.mode`, so the
+  tally slate can read current hunger without a new import shape.
+- `core/voxel-grid.js`: new `TALLY_SLATE` item id. `core/textures.js`: a
+  `tallySlate` icon — a plain wood board with scratched tally marks,
+  deliberately low-tech next to the Range Rod's glowing LCD look, since it's
+  Wren's own handmade counting tool.
+- **Wren** (Hearth Camp's quartermaster, per `STORYLINE.md` §3) is now a
+  second settler, spawned close to the player's own spawn point (a short
+  walk, not a trek, matching "Hearth Camp" being the hub). `entities/npc/
+  npc.js`'s `spawnSettlers()`/`interactNPC()` generalized just enough to
+  place and greet two settlers (a `SETTLER_SPECS` list) without adopting
+  the full data-driven `quest-data.js` model — that's still deferred to
+  Slice 3, per Slice A's log. Wren's favour has no report-back step (unlike
+  Pip's): the tally slate is an ongoing readout, not a single measurement to
+  bring back, so granting it *is* the whole favour. Her ask references Pip
+  by name for continuity ("Pip mentioned you were handy").
+
+**Verified:** `node --check` on every touched/new file; a full headless-
+Chromium pass with zero console/page errors, including an interactive pass
+(pointer lock succeeded, confirming the Follow-up 2 fix above holds here
+too) exercising the entire per-frame loop with the new tool registered; a
+standalone script running `generateWorld()` + the real placement logic
+directly in Node confirmed both settlers place successfully for this
+world's seed with sane separation (12.5 blocks apart). **Not yet done:**
+an end-to-end interactive check of actually walking to Wren, receiving the
+slate, and reading its screen — the settler-placement and tool-registration
+logic are verified independently, but no automated test in this
+environment walks the player to an NPC and confirms the granted tool's
+`screenText()` output character-for-character. Worth a manual pass.
 
 ---
 

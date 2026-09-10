@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GRASS, DIRT, SAND, WOOD, WL, RANGE_ROD, inBounds, blockAt, setBlockRaw, topSolidY } from '../../core/voxel-grid.js';
+import { GRASS, DIRT, SAND, WOOD, WL, RANGE_ROD, TALLY_SLATE, inBounds, blockAt, setBlockRaw, topSolidY } from '../../core/voxel-grid.js';
 import { rebuildAround } from '../../core/chunks.js';
 import { scene, camera } from '../../core/scene.js';
 import { player } from '../../player/player.js';
@@ -17,8 +17,10 @@ import { rough, rangeBand, measureState } from '../../inventory/tools/range-rod.
 // code, matching the original exactly — it does NOT yet adopt the data-driven quest-data.js
 // content model from DEV_HANDOFF.md §5. That generalization (settler definitions as data,
 // a trigger evaluator, per-context nodeIds) is Slice 3 work per DEV_HANDOFF.md §8's task
-// table ("Social channel: first NPC who *reasons while doing*" — blocked on character copy),
-// not part of this behavior-identical module refactor.
+// table ("Social channel: first NPC who *reasons while doing*" — blocked on character copy).
+// SETTLER_SPECS below is a light, hand-rolled step in that direction (enough to support
+// two settlers without duplicating spawnSettlers/interactNPC per character) — still direct
+// code, not the generalized trigger engine §5 describes.
 export const NPCS = [];
 const _mv = new THREE.Vector3();   // reused view-direction vector (see entities/mobs.js for the same pattern)
 
@@ -69,7 +71,31 @@ function plantMarker(x, z, h) {
   rebuildAround(x, z);
 }
 
-function addSettler(x, y, z, name, task, landmark) {
+// One entry per settler. `ask`/`grant` take the NPC instance so they can read `n.landmark`
+// (only Pip uses it). `radius`/`minSep` place each settler a plausible distance from spawn
+// without overlapping another settler that's already been placed this call.
+const SETTLER_SPECS = [
+  {
+    name: 'Pip', grantItem: RANGE_ROD, radius: 15, findLandmark: true, minSep: 0,
+    ask: (n) => n.landmark
+      ? "I have shaky hands — see the post I staked on that rise? I'm hoping it's close enough to carry a signal fire, but I can't judge the distance myself anymore."
+      : "I have shaky hands — I need to know how far off things are before I trust a route, and my eyes aren't what they used to be.",
+    grant: (n) => n.landmark
+      ? "Take the rod — line it up on the post I staked and see what you get. If it's close enough, that's our next relay point."
+      : "Take the rod and get a feel for the distances out here — I won't commit to a walk until I know what I'm in for.",
+  },
+  {
+    // Hearth Camp's quartermaster — close to spawn, per STORYLINE.md §3. References Pip by
+    // name for continuity even though the two never actually talk; the player meets Pip
+    // first (Pip spawns closer to the front of the search ring), so this reads as "word
+    // travels fast in a small camp," not a broken reference.
+    name: 'Wren', grantItem: TALLY_SLATE, radius: 8, findLandmark: false, minSep: 10,
+    ask: () => "Pip mentioned you were handy — could you help me keep an eye on the stores? My own count keeps slipping.",
+    grant: () => "Here — take this tally slate. Carry it and it'll keep a running count of what's on you, and how your food's holding out. Saves me asking every time you pass through.",
+  },
+];
+
+function addSettler(x, y, z, spec, landmark) {
   const g = makeSettlerMesh();
   g.position.set(x, y, z);
   scene.add(g);
@@ -77,24 +103,33 @@ function addSettler(x, y, z, name, task, landmark) {
   // close enough to make the NPC turn to face them — a subtle "this is what I mean" cue
   // instead of a waypoint marker or arrow, which would read as a HUD, not a stranger.
   const faceYaw = landmark ? Math.atan2(landmark.x - x, landmark.z - z) : Math.random() * 6.28;
-  NPCS.push({ name, task, pos: new THREE.Vector3(x, y, z), group: g, landmark, helped: false, spoke: false, reported: false, nudged: false, faceYaw, bobT: Math.random() * 3 });
+  const n = {
+    name: spec.name, grantItem: spec.grantItem, ask: spec.ask, grant: spec.grant,
+    pos: new THREE.Vector3(x, y, z), group: g, landmark,
+    helped: false, spoke: false, reported: false, nudged: false,
+    faceYaw, bobT: Math.random() * 3,
+  };
+  NPCS.push(n);
+  return n;
 }
 // spawnXZ is passed in rather than imported, same as entities/mobs.js's spawnMobs — see
 // IMPLEMENTATION_PLAN.md's Slice A log.
 export function spawnSettlers(spawnXZ) {
-    // one settler a short walk from spawn so the player meets the "help a stranger" pattern early
-  for (let k = 0; k < 12; k++) {
-    const a = k / 12 * Math.PI * 2;
-    const tx = Math.floor(spawnXZ[0] + Math.cos(a) * 15), tz = Math.floor(spawnXZ[1] + Math.sin(a) * 15);
-    if (!inBounds(tx, 3, tz)) continue;
-    const hgt = topSolidY(tx, tz);
-    if (hgt < WL + 1) continue;
-    const surf = blockAt(tx, hgt, tz);
-    if (surf !== GRASS && surf !== DIRT && surf !== SAND) continue;
-    const landmark = findNearbyRidge(tx, tz, hgt);
-    if (landmark) plantMarker(landmark.x, landmark.z, landmark.h);
-    addSettler(tx + 0.5, hgt + 1 + 0.02, tz + 0.5, 'Pip', 'measure', landmark);
-    return;     // one settler for now; more as more tools exist
+  for (const spec of SETTLER_SPECS) {
+    for (let k = 0; k < 12; k++) {
+      const a = k / 12 * Math.PI * 2;
+      const tx = Math.floor(spawnXZ[0] + Math.cos(a) * spec.radius), tz = Math.floor(spawnXZ[1] + Math.sin(a) * spec.radius);
+      if (!inBounds(tx, 3, tz)) continue;
+      const hgt = topSolidY(tx, tz);
+      if (hgt < WL + 1) continue;
+      const surf = blockAt(tx, hgt, tz);
+      if (surf !== GRASS && surf !== DIRT && surf !== SAND) continue;
+      if (spec.minSep > 0 && NPCS.some(o => Math.hypot(o.pos.x - tx, o.pos.z - tz) < spec.minSep)) continue;
+      const landmark = spec.findLandmark ? findNearbyRidge(tx, tz, hgt) : null;
+      if (landmark) plantMarker(landmark.x, landmark.z, landmark.h);
+      addSettler(tx + 0.5, hgt + 1 + 0.02, tz + 0.5, spec, landmark);
+      break;
+     }
    }
 }
 export function targetedNPC() {
@@ -115,18 +150,18 @@ export function interactNPC() {
   const n = targetedNPC();
   if (!n) return false;
   if (!n.helped) {
-    if (!hasItem(RANGE_ROD)) addItem(RANGE_ROD, 1);       // the favour, granted: the tool is yours
-    // Granting the rod is not "thanks, you're done" — nothing has been measured yet. The
-    // ask and the report-back are two separate beats, closed below once the rod has
-    // actually been pointed at something (see range-rod.js's measureState).
-    sayDialog(n.name, n.landmark
-      ? "Take the rod — line it up on the post I staked and see what you get. If it's close enough, that's our next relay point."
-      : "Take the rod and get a feel for the distances out here — I won't commit to a walk until I know what I'm in for.");
+    if (!hasItem(n.grantItem)) addItem(n.grantItem, 1);   // the favour, granted: the tool is yours
+    // Granting the tool is not "thanks, you're done" for Pip specifically — nothing has
+    // been measured yet. The ask and the report-back are two separate beats, closed below
+    // once the rod has actually been pointed at something (see range-rod.js's measureState).
+    // Wren's favour has no report-back: the tally slate is an ongoing readout, not a single
+    // measurement to bring back, so granting it *is* the whole favour.
+    sayDialog(n.name, n.grant(n));
     n.helped = true;
     triggerArmSwing('place');
     return true;
    }
-  if (!n.reported) {
+  if (n.grantItem === RANGE_ROD && !n.reported) {
     if (measureState.everMeasured) {
       // Whatever the player actually measured — echoed back, not graded. Per MATH_PLAN.md
       // §8: no single correct numeric answer, no "wrong" reading. Pip's reaction only
@@ -160,11 +195,6 @@ export function updateNPCs(dt) {
       n.group.rotation.y = n.faceYaw;
      }
       // ask for the favour once, when the player first comes close
-    if (!n.helped && !n.spoke && dist < 7) {
-      sayDialog(n.name, n.landmark
-        ? "I have shaky hands — see the post I staked on that rise? I'm hoping it's close enough to carry a signal fire, but I can't judge the distance myself anymore."
-        : "I have shaky hands — I need to know how far off things are before I trust a route, and my eyes aren't what they used to be.");
-      n.spoke = true;
-    }
+    if (!n.helped && !n.spoke && dist < 7) { sayDialog(n.name, n.ask(n)); n.spoke = true; }
    }
 }

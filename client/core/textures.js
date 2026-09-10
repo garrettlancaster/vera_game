@@ -53,6 +53,16 @@ export const texCanvases = {
     if (grip)   return vary([44, 48, 58], 5);       // handle
     return [0, 0, 0, 0];                            // transparent
   }),
+   // Tally Slate: a plain wooden board with a few scratched tally marks — deliberately
+   // low-tech (no screen) next to the Range Rod's electronic look, since it's Wren's own
+   // handmade counting tool, not an instrument (the hotbar icon)
+  tallySlate: makeTex((x, y) => {
+    const board = y >= 1 && y <= 14 && x >= 2 && x <= 13;
+    if (!board) return [0, 0, 0, 0];                // transparent
+    const tally = y >= 6 && y <= 9 && ((x - 4) % 3 === 0) && x >= 4 && x <= 11;
+    if (tally) return vary([70, 52, 34], 6);         // scratched tally marks
+    return vary([176, 140, 92], 10);                 // pale wood board
+  }),
 };
 
 export function toTexture(c) {

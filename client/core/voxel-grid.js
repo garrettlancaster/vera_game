@@ -5,6 +5,7 @@ export const W = 960, D = 960, H = 28;      // world size (x, z, height) — 2.5
 export const CH = 32;                       // region size along x/z (edited regions are rebuilt as a whole)
 export const AIR = 0, GRASS = 1, DIRT = 2, STONE = 3, WOOD = 4, LEAVES = 5, SAND = 6, WATER = 7, MEAT = 8, CACTUS = 9, TALL_GRASS = 10;
 export const RANGE_ROD = 11;   // handheld surveyor tool (given by an NPC, used to measure distance & height)
+export const TALLY_SLATE = 12; // handheld stock/rate readout (given by an NPC, Slice 2 — see IMPLEMENTATION_PLAN.md)
 export const WL = 6;                        // water level — water fills y <= WL where terrain is lower
 
 // ============================================================ world storage

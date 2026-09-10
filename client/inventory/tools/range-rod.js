@@ -3,7 +3,9 @@ import { RANGE_ROD, topSolidY } from '../../core/voxel-grid.js';
 import { camera } from '../../core/scene.js';
 import { toolScreen } from '../../player/arm.js';
 import { raycastVoxel } from '../../interaction/raycast.js';
-import { registerTool } from './tool-device.js';
+import { registerTool, rough } from './tool-device.js';
+
+export { rough };   // re-exported: entities/npc/npc.js already imports `rough` from here
 
 // ============================================================ range rod (legibility, via a tool)
 // The first "math is in the world" surface — but it's a *tool you earn*, not a HUD you're
@@ -12,14 +14,6 @@ import { registerTool } from './tool-device.js';
 // the block, because precision at that scale is an illusion and the point is number sense,
 // not an exact answer. The reading is drawn on the rod's screen and echoed in a small panel.
 
-// magnitude-aware rounding: small distances read exactly, large ones coarser
-export function rough(n) {
-  const a = Math.abs(n);
-  if (a < 10)  return Math.round(n);
-  if (a < 100) return Math.round(n / 5) * 5;
-  if (a < 500) return Math.round(n / 10) * 10;
-  return Math.round(n / 25) * 25;
-}
 // a plain magnitude word, so the reading is a *feel*, not just a figure
 export function rangeBand(n) {
   const a = Math.abs(n);

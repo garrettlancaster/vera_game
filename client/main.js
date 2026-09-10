@@ -32,7 +32,8 @@ import { stepPhysics, cactusTick } from './physics/physics.js';
 
 import { inventory, selIndex, selectSlot } from './inventory/inventory.js';
 import { getToolFor } from './inventory/tools/tool-device.js';
-import './inventory/tools/range-rod.js';   // side-effect import: registers the Range Rod tool
+import './inventory/tools/range-rod.js';    // side-effect import: registers the Range Rod tool
+import './inventory/tools/tally-slate.js';  // side-effect import: registers the Tally Slate tool (Slice 2)
 
 import { aimHit } from './interaction/raycast.js';
 import { doBreak, updateMining, cancelMining } from './interaction/mining.js';

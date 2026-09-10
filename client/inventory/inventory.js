@@ -1,4 +1,4 @@
-import { GRASS, DIRT, STONE, WOOD, LEAVES, SAND, MEAT, CACTUS, RANGE_ROD } from '../core/voxel-grid.js';
+import { GRASS, DIRT, STONE, WOOD, LEAVES, SAND, MEAT, CACTUS, RANGE_ROD, TALLY_SLATE } from '../core/voxel-grid.js';
 import { texCanvases } from '../core/textures.js';
 import { setHeldItem } from '../player/arm.js';
 
@@ -22,6 +22,7 @@ export const ITEM_INFO = {
     [MEAT]:   { name: 'Meat',  tex: 'meat', noPlace: true },
     [CACTUS]: { name: 'Cactus', tex: 'cactus' },
      [RANGE_ROD]: { name: 'Range Rod', tex: 'rangeRod', noPlace: true, tool: 'measure' },
+     [TALLY_SLATE]: { name: 'Tally Slate', tex: 'tallySlate', noPlace: true, tool: 'tally' },
 };
 
 export const inventory = new Array(INV_SIZE).fill(null);    // slot -> null | { id, count }

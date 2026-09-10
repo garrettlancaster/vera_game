@@ -122,16 +122,20 @@ export function updateOxygen(dt) {
 }
 
 // ---- hunger: drains over time, faster when moving / sprinting; refilled by eating meat
-const HUNGER_MAX = 10;                       // one bar per unit (== HUNGER_COUNT icons)
+export const HUNGER_MAX = 10;                // one bar per unit (== HUNGER_COUNT icons)
 let hunger = HUNGER_MAX;                     // fractional 0..HUNGER_MAX -> bars drop off one by one as it falls
-const HUNGER_DRAIN = { idle: HUNGER_MAX/3600, walk: HUNGER_MAX/1200, run: HUNGER_MAX/600 };   // full->empty in ~1h / ~20min / ~10min
-export const hungerState = { mode: 'idle' };   // set each frame from physics.js's stepPhysics based on actual movement
+export const HUNGER_DRAIN = { idle: HUNGER_MAX/3600, walk: HUNGER_MAX/1200, run: HUNGER_MAX/600 };   // full->empty in ~1h / ~20min / ~10min
+// `level` mirrors `hunger` on every change below — the tally slate (inventory/tools/
+// tally-slate.js) reads it for its plain-language rate projection; kept as a field on
+// the same exported object as `mode` rather than a new export, same pattern as `health`.
+export const hungerState = { mode: 'idle', level: HUNGER_MAX };
 
 function renderHunger() { for (let i = 0; i < HUNGER_COUNT; i++) drawMeat(hungerEl.children[i], i < hunger); }
 export function updateHunger(dt) {
   if (!locked || health.hp <= 0) return;
   const before = hunger;
   hunger = Math.max(0, hunger - HUNGER_DRAIN[hungerState.mode] * dt);
+  hungerState.level = hunger;
   if (Math.floor(before) !== Math.floor(hunger)) renderHunger();   // repaint only when a bar crosses an integer boundary
 }
 
@@ -151,7 +155,7 @@ export function updateEat(dt, triggerArmSwing) {
     munchT += dt;                            // chew continuously WHILE holding, so you hear it as it happens
     while (munchT >= MUNCH_INTERVAL) { munchT -= MUNCH_INTERVAL; SFX.chew(); }
     if (eatT >= EAT_TIME) {
-      hunger = Math.min(HUNGER_MAX, hunger + EAT_GAIN); renderHunger();
+      hunger = Math.min(HUNGER_MAX, hunger + EAT_GAIN); hungerState.level = hunger; renderHunger();
       removeOneSelected();                   // consume one meat from the held slot (updates hand + hotbar)
       if (triggerArmSwing) triggerArmSwing('break');   // a little strike as it lands in your mouth
       eatT = 0; munchT = 0;
