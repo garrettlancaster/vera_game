@@ -1,4 +1,5 @@
 import { RANGE_ROD, TALLY_SLATE } from '../../core/voxel-grid.js';
+import { player } from '../../player/player.js';
 import { rangeBand, rough, measureState } from '../../inventory/tools/range-rod.js';
 
 // ============================================================ settler / quest data
@@ -23,10 +24,15 @@ import { rangeBand, rough, measureState } from '../../inventory/tools/range-rod.
 //   lines.grant(n)     spoken when the context actually completes (on interact, once ready)
 //   nodeIds       SKILL_HIERARCHY.md node ids this context teaches/exercises
 
-const MARKER_SIGHT_RADIUS = 10;   // how close a rod reading's hit point must land to the
-                                   // marker to count as "looked at the marker," not just
-                                   // "looked at the general area" — generous because the
-                                   // post itself is a single block wide at 40+ blocks' range
+// How close a rod reading's hit point must land to the marker to count as "looked at the
+// marker," not just "looked at the general area." Scales with how far away the marker is
+// from where the player stands: a fixed 10-block radius (the original value) let a glance
+// at the near slope of the hill count as sighting a post twice as far off — and Pip then
+// echoed that wrong, shorter distance back as if it were the post's.
+function markerSightRadius(n) {
+  const d = Math.hypot(player.pos.x - n.landmark.x, player.pos.z - n.landmark.z);
+  return Math.max(3, Math.min(10, d * 0.15));
+}
 
 function pipReportBackReady(n) {
   return n.landmark ? n.markerSighted : measureState.everMeasuredFar;
@@ -35,7 +41,7 @@ function pipTrackMarkerSight(n) {
   if (!n.landmark || n.markerSighted) return;
   if (measureState.hitX == null) return;
   const hitDist = Math.hypot(measureState.hitX - n.landmark.x, measureState.hitZ - n.landmark.z);
-  if (hitDist <= MARKER_SIGHT_RADIUS) { n.markerSighted = true; n.sightedRange = measureState.range; }
+  if (hitDist <= markerSightRadius(n)) { n.markerSighted = true; n.sightedRange = measureState.range; }
 }
 function pipReportBackLine(n) {
   // Whatever the player actually measured — echoed back, not graded. Per MATH_PLAN.md §8:

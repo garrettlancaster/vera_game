@@ -385,6 +385,30 @@ approach.
 
 ---
 
+### Follow-up 4 — full Pip loop playtested; two bugs it exposed
+
+Scripted Playwright run of the whole loop (walk to Pip, ask, premature second
+ask, aim away, aim at the post, report back), no console errors. Camera turns
+went through the real `mousemove` handler via dispatched events carrying an
+explicit `movementX/Y` (Playwright's own `mouse.move` nets to zero under
+pointer lock); clicks were real Playwright presses. Seed/world as shipped, one
+route (approach from spawn) — not a multi-seed test. Found and fixed:
+
+- **One held click delivered two beats.** `main.js`'s hold-to-repeat re-calls
+  `interactNPC()` every 300ms, so a normal-length press granted the rod *and*
+  completed `pip.report-back`; the grant line was never seen. `npc.js` now has
+  a per-settler `talkCooldown` (1.5s game time) — generic, not Pip-specific.
+- **"Sighted the marker" was too loose.** The fixed 10-block radius counted the
+  hill's near slope (hit while merely looking at Pip, who stands in front of
+  it) as the post, and Pip echoed "about 10" for a post ~20 away.
+  `markerSightRadius(n)` now scales with distance to the marker (3..10 blocks).
+
+Verified after the fix: grant only on click 1; nudge on click 2; not sighted
+while aimed away; sighted + `~20 / a long way / +15 up` on the post; report
+echoes "about 20".
+
+---
+
 ## Slices 3+ — where Elixir/Phoenix enters
 
 - **Slice 3 (Social channel):** a builder NPC who *reasons out loud while working*

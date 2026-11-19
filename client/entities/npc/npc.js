@@ -78,7 +78,7 @@ function addSettler(x, y, z, spec, landmark) {
   const n = {
     spec, name: spec.displayName, pos: new THREE.Vector3(x, y, z), group: g, landmark,
     completedContexts: new Set(), spokenApproachFor: new Set(), nudgedFor: new Set(),
-    faceYaw, bobT: Math.random() * 3,
+    faceYaw, bobT: Math.random() * 3, talkCooldown: 0,
   };
   NPCS.push(n);
   return n;
@@ -132,11 +132,17 @@ export function targetedNPC() {
   return best;
 }
 
+const TALK_COOLDOWN = 1.5;   // seconds of game time between beats with the same settler
 export function interactNPC() {
   const n = targetedNPC();
   if (!n) return false;
+  // One beat per press: main.js's hold-to-repeat calls this every 300ms while the button
+  // is down, and without a pause a single held click delivered two contexts back to back
+  // (grant + the next beat), so the first line was never seen. Still consumes the click.
+  if (n.talkCooldown > 0) return true;
   const ctx = currentContext(n);
   if (!ctx) return true;                     // nothing left to say or do — consume the click quietly
+  n.talkCooldown = TALK_COOLDOWN;
   const ready = ctx.ready ? ctx.ready(n) : true;
   if (!ready) {
     if (ctx.lines.nudge && !n.nudgedFor.has(ctx.id)) {
@@ -155,6 +161,7 @@ export function interactNPC() {
 export function updateNPCs(dt) {
   for (const n of NPCS) {
     n.bobT += dt;
+    if (n.talkCooldown > 0) n.talkCooldown -= dt;
     const bob = Math.sin(n.bobT * 1.4) * 0.03;
     n.group.position.set(n.pos.x, n.pos.y + bob, n.pos.z);
     const dx = player.pos.x - n.pos.x, dz = player.pos.z - n.pos.z;
