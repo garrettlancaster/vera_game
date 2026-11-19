@@ -67,7 +67,7 @@ function plantMarker(x, z, h) {
   rebuildAround(x, z);
 }
 
-function addSettler(x, y, z, spec, landmark) {
+function addSettler(x, y, z, spec, landmark, site = null) {
   const g = makeSettlerMesh();
   g.position.set(x, y, z);
   scene.add(g);
@@ -78,7 +78,7 @@ function addSettler(x, y, z, spec, landmark) {
   const n = {
     spec, name: spec.displayName, pos: new THREE.Vector3(x, y, z), group: g, landmark,
     completedContexts: new Set(), spokenApproachFor: new Set(), nudgedFor: new Set(),
-    faceYaw, bobT: Math.random() * 3, talkCooldown: 0,
+    faceYaw, bobT: Math.random() * 3, talkCooldown: 0, approachHold: 0, playerDist: Infinity, site,
   };
   NPCS.push(n);
   return n;
@@ -98,9 +98,19 @@ export function spawnSettlers(spawnXZ) {
       const surf = blockAt(tx, hgt, tz);
       if (surf !== GRASS && surf !== DIRT && surf !== SAND) continue;
       if (minSep > 0 && NPCS.some(o => Math.hypot(o.pos.x - tx, o.pos.z - tz) < minSep)) continue;
+      // A settler with a work site (quest-data.js's `spawn.site`, built by sites.js) only
+      // settles where the site fits; it must keep clear of spawn, other settlers and their
+      // landmarks, since building it reshapes the ground.
+      let site = null;
+      if (spec.spawn.site) {
+        const avoid = [{ x: spawnXZ[0], z: spawnXZ[1] }];
+        for (const o of NPCS) { avoid.push({ x: o.pos.x, z: o.pos.z }); if (o.landmark) avoid.push(o.landmark); }
+        site = spec.spawn.site(tx, tz, hgt, avoid);
+        if (!site) continue;
+      }
       const landmark = findLandmark ? findNearbyRidge(tx, tz, hgt) : null;
       if (landmark) plantMarker(landmark.x, landmark.z, landmark.h);
-      addSettler(tx + 0.5, hgt + 1 + 0.02, tz + 0.5, spec, landmark);
+      addSettler(tx + 0.5, hgt + 1 + 0.02, tz + 0.5, spec, landmark, site);
       break;
      }
    }
@@ -151,21 +161,31 @@ export function interactNPC() {
     }
     return true;
    }
-  if (ctx.grantsItem && !hasItem(ctx.grantsItem)) addItem(ctx.grantsItem, 1);   // the favour, granted: the tool is yours
-  sayDialog(n.name, ctx.lines.grant(n));
-  n.completedContexts.add(ctx.id);
+  completeContext(n, ctx);
   triggerArmSwing('place');
   return true;     // consume the click so it doesn't swing a weapon through the NPC
+}
+
+// A tool (no grantCount) is handed over once, and never duplicated if already held;
+// materials for a job (grantCount) are handed over regardless of what's already carried.
+const APPROACH_HOLD = 5;   // seconds the completion line gets before the next context's approach line may replace it
+function completeContext(n, ctx) {
+  if (ctx.grantsItem && (ctx.grantCount || !hasItem(ctx.grantsItem))) addItem(ctx.grantsItem, ctx.grantCount ?? 1);
+  if (ctx.lines.grant) sayDialog(n.name, ctx.lines.grant(n));
+  n.completedContexts.add(ctx.id);
+  n.approachHold = APPROACH_HOLD;
 }
 
 export function updateNPCs(dt) {
   for (const n of NPCS) {
     n.bobT += dt;
     if (n.talkCooldown > 0) n.talkCooldown -= dt;
+    if (n.approachHold > 0) n.approachHold -= dt;
     const bob = Math.sin(n.bobT * 1.4) * 0.03;
     n.group.position.set(n.pos.x, n.pos.y + bob, n.pos.z);
     const dx = player.pos.x - n.pos.x, dz = player.pos.z - n.pos.z;
     const dist = Math.hypot(dx, dz);
+    n.playerDist = dist;   // for quest-data.js hooks (e.g. a demonstration that only runs while watched)
     if (dist < 16) {
       const target = Math.atan2(dx, dz);
       let dyaw = ((target - n.faceYaw + Math.PI) % (Math.PI * 2)) - Math.PI;
@@ -176,7 +196,10 @@ export function updateNPCs(dt) {
     const ctx = currentContext(n);
     if (!ctx) continue;
     if (ctx.track) ctx.track(n, dt);   // background state (e.g. "has the rod sighted the marker"), independent of proximity
-    if (ctx.lines.approach && !n.spokenApproachFor.has(ctx.id) && dist < (ctx.trigger?.dist ?? 7)) {
+    // A demonstration the player only has to witness (STORYLINE.md's Environmental channel)
+    // finishes by itself the moment it's ready — there is nothing to click.
+    if (ctx.autoComplete && n.spokenApproachFor.has(ctx.id) && (!ctx.ready || ctx.ready(n))) { completeContext(n, ctx); continue; }
+    if (ctx.lines.approach && !n.spokenApproachFor.has(ctx.id) && n.approachHold <= 0 && dist < (ctx.trigger?.dist ?? 7)) {
       sayDialog(n.name, ctx.lines.approach(n));
       n.spokenApproachFor.add(ctx.id);
     }

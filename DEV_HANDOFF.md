@@ -148,6 +148,9 @@ client/
       npc.js                        — NPCS, makeSettlerMesh, addSettler,
                                 targetedNPC, interactNPC, updateNPCs
       dialogue.js                    — sayDialog, updateDialog
+      sites.js                        — NEW (Slice 3): world props a settler's
+                                contexts are about (Bram's quarry yard:
+                                buildQuarrySite, setSiteBlock, roomCells)
       quest-data.js                   — NEW: data-driven settler/quest
                                 content (§5), replaces the hardcoded
                                 `spawnSettlers()` body
@@ -313,6 +316,26 @@ that later.
   context nothing gates on tool use, which is the right shape only when
   the favour truly has no report-back step (Wren's slate: an ongoing
   readout, not a single measurement to bring back).
+- **Added for Bram (Slice 3) — all generic, none Bram-specific in `npc.js`:**
+  - `spawn.site` names a builder from `entities/npc/sites.js`. The engine
+    calls it at spawn (`site(tx, tz, h, avoid)`), stores the result as
+    `n.site`, and moves to the next spot on the spawn ring if it returns
+    `null`. A context whose quantity the player must judge gets a *site* —
+    real, walkable blocks — never a number in a line.
+  - `autoComplete: true` completes a context with no click once its
+    approach line has been spoken and `ready(n)` holds: the shape of an
+    Environmental-channel demonstration (`bram.stacking-a-wall`).
+  - `grantCount` hands over that many of `grantsItem` regardless of what's
+    carried (materials for a job); without it `grantsItem` is a one-off tool.
+  - `n.playerDist` is set every frame for hooks (a demonstration that only
+    advances while watched).
+  - Pacing, engine-owned: `talkCooldown` (one beat per press — hold-to-repeat
+    otherwise delivers two contexts in one click) and `approachHold` (a
+    completion line gets 5s before the next context's approach line may
+    replace it).
+  - A hook that itself speaks (`track` calling `sayDialog`, as Bram's row
+    remarks do) is allowed; a hook that changes blocks goes through
+    `sites.js`, not `voxel-grid.js` directly.
 - `lines` stay short, in-character, and — per the non-negotiable rules in
   §0 — never name a math concept. If a line is hard to write without
   naming one, the *context* design is wrong, not the line.
@@ -534,7 +557,7 @@ is the "how," that one stays the "what/status" ledger.
 | **A — module refactor** (new; do first) | Split `game.js` per §3's layout, behavior-identical. Verify with `node --check` on every file + a manual play session against current build. | none |
 | **1 — Range Rod** *(done)* | Re-home into `inventory/tools/range-rod.js` + `tool-device.js` per §4, during Slice A only — no behavior change. | A |
 | **2 — stock/rate readouts** | Second `ToolDevice` (or a HUD-embedded always-on readout, per `IMPLEMENTATION_PLAN.md`'s existing framing — resolve which during implementation, both fit §4's interface) | A, 1 |
-| **3 — Social channel: Bram** | `quest-data.js` entries for Bram's Contexts 1–5 (`STORYLINE §5.3`); extend `npc.js`'s trigger evaluator for `item-held`/`contexts-done` triggers if Bram's contexts need them | A, 5's schema (for `nodeIds` to mean anything server-side) but can ship client-only first with `nodeIds` inert |
+| **3 — Social channel: Bram** *(Contexts 1–2 done, client-only; 3–5 open)* | `quest-data.js` entries for Bram's Contexts 1–5 (`STORYLINE §5.3`), sites in `sites.js`. Context 4 ("sorting stone by shape") has no honest form while every block is a cube — needs non-cube pieces or a redesign, see §10 | A, 5's schema (for `nodeIds` to mean anything server-side) but can ship client-only first with `nodeIds` inert |
 | **4 — Economy: derived build costs** | `area.tiling`/`area.as-multiplication` made real: a build task's material count must be computed from a *visible* footprint, never handed over (`MATH_PLAN §6` Rung 3 guardrail) | 3 |
 | **5 — Adaptive engine online** | Stand up `Vera` (Phoenix app), §6's contexts/schemas, §7's channel + contracts, the seed task. Wire `telemetry/behavior-events.js` + `net/phoenix-socket.js` on the client. | A, 3, 4 |
 | **6 — remaining settlers** | Wren, Nettie, Fen, Corwin per `STORYLINE §5.1, 5.4–5.6`, same pattern as Bram | 5 (so unlocks/verbosity are real, not stubbed) |
@@ -554,6 +577,12 @@ Elixir `mix` task if it lives server-side, Node script if client-side) that:
 3. Fails CI/local run if either side references an id the other doesn't
    have — catching exactly the "docs and data diverged" failure mode this
    whole handoff exists to prevent.
+
+**Built:** `node scripts/check_traceability.mjs` covers the client half (node ids
+in `quest-data.js` exist in `SKILL_HIERARCHY.md`; context ids unique and under
+their settler; triggers reference real contexts). It checks existence, not the
+"subset of that settler's strand" rule, and there is no `settler_contexts.json`
+yet to check.
 
 **Naming conventions:**
 - Skill node ids: `strand-shorthand.kebab-case-name`, matching
@@ -597,3 +626,9 @@ Elixir `mix` task if it lives server-side, Node script if client-side) that:
   already quotes — that document gives the *shape* of each line; a smaller
   model extending it should draft new lines but flag them for a human pass
   on tone, per `MATH_PLAN §9`'s "character copy... must stay in-character."
+- **Bram's lines (`quest-data.js`) are a first draft written during
+  implementation, not reviewed copy** — flagged for that human tone pass.
+- **Bram's Context 4 (sorting stone by shape):** every block is a cube, so
+  there are no "recognizably different block-shapes" to sort. Either add
+  non-cube pieces or re-stage the context (e.g. sorting *built* shapes by
+  footprint); a design call, not an implementation detail.

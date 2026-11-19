@@ -1,4 +1,7 @@
-import { RANGE_ROD, TALLY_SLATE } from '../../core/voxel-grid.js';
+import { RANGE_ROD, TALLY_SLATE, STONE, blockAt } from '../../core/voxel-grid.js';
+import { inventory } from '../../inventory/inventory.js';
+import { sayDialog } from './dialogue.js';
+import { buildQuarrySite, setSiteBlock, roomCells } from './sites.js';
 import { player } from '../../player/player.js';
 import { rangeBand, rough, measureState } from '../../inventory/tools/range-rod.js';
 
@@ -19,6 +22,9 @@ import { rangeBand, rough, measureState } from '../../inventory/tools/range-rod.
 //   track(n, dt)  optional — runs every frame regardless of proximity, for state that
 //                 accrues in the background (e.g. "has the rod been pointed at the marker")
 //   grantsItem    optional — an ITEM_INFO id handed over the moment this context completes
+//   grantCount    optional — how many (materials for a job); omit for a one-off tool
+//   autoComplete  optional — completes by itself once approached and ready(n), no click
+//                 needed: a demonstration the player only has to witness
 //   lines.approach(n)  spoken once, on proximity, before this context is completed
 //   lines.nudge(n)     spoken once per context if the player interacts before ready(n)
 //   lines.grant(n)     spoken when the context actually completes (on interact, once ready)
@@ -55,6 +61,49 @@ function pipReportBackLine(n) {
   return close
     ? `So it's about ${r}, ${band} — well within reach. That'll make a fine relay point. Thank you.`
     : `About ${r}, ${band} — further than I'd hoped, but better to know now than halfway there. Thank you.`;
+}
+
+// ---- Bram (STORYLINE.md §5.3). His site (n.site) is built by sites.js's buildQuarrySite.
+// Context 1 is the Environmental channel: he raises a wall a stone at a time and talks to
+// himself in rows — never a raw tally, and never a word for the operation. He only works
+// while someone's close enough to watch, so the demonstration can't finish unseen.
+const BRAM_STONE_BEAT = 0.9;      // seconds per stone — a row takes about as long as its line stays up
+const BRAM_WATCH_DIST = 12;
+const BRAM_ROW_LINES = [
+  "That's the first row. Five.",
+  "Second row — five, and five again. Ten. Same row, laid twice.",
+  "Third. Fifteen up. I've stopped counting stones — I'm only counting rows now.",
+];
+function bramTrackWall(n, dt) {
+  const w = n.site.wall;
+  if (n.wallLaid == null) { n.wallLaid = 0; n.wallT = 0; }
+  if (!n.spokenApproachFor.has('bram.stacking-a-wall')) return;      // not before he's said hello
+  if (n.wallLaid >= w.cells.length || n.playerDist > BRAM_WATCH_DIST) return;
+  n.wallT += dt;
+  if (n.wallT < BRAM_STONE_BEAT) return;
+  n.wallT = 0;
+  const c = w.cells[n.wallLaid++];
+  setSiteBlock(c.x, c.y, c.z, STONE);
+  const rowsDone = n.wallLaid / w.perRow;
+  if (Number.isInteger(rowsDone) && rowsDone < w.rows) sayDialog(n.name, BRAM_ROW_LINES[rowsDone - 1]);
+}
+const bramWallDone = (n) => n.wallLaid >= n.site.wall.cells.length;
+
+// Context 2 is the Challenge channel: the sunken store-room is real and walkable, so how
+// much stone it wants is something to pace out or eyeball, never something Bram states.
+// He hands over a heap that is deliberately not the exact amount.
+const BRAM_FLOOR_HEAP = 30;
+const bramFloorLaid = (n) => roomCells(n.site.room).every(c => blockAt(c.x, c.y, c.z) === STONE);
+function bramFloorLaidLine(n) {
+  // Echoed, not graded (MATH_PLAN.md §8): whatever is left over is just a fact about the
+  // pile. The rows remark ties the floor back to the wall without stating a total.
+  const { w, d } = n.site.room;
+  let left = 0;
+  for (const st of inventory) if (st && st.id === STONE) left += st.count;
+  const tail = left > 0
+    ? "And stone left over for the pile — better that than a walk back for more."
+    : "And not a stone to spare.";
+  return `That's a floor — not a gap in it. ${w} to a row, ${d} rows: it's the wall again, lying down. ${tail}`;
 }
 
 export const SETTLERS = [
@@ -109,6 +158,45 @@ export const SETTLERS = [
         lines: {
           approach: () => "Pip mentioned you were handy — could you help me keep an eye on the stores? My own count keeps slipping.",
           grant: () => "Here — take this tally slate. Carry it and it'll keep a running count of what's on you, and how your food's holding out. Saves me asking every time you pass through.",
+        },
+      },
+    ],
+  },
+  {
+    // The Quarry's mason — further out than Pip, so the player meets him third.
+    id: 'bram', displayName: 'Bram',
+    spawn: { radius: 26, findLandmark: false, minSep: 10, site: buildQuarrySite },
+    contexts: [
+      {
+        id: 'bram.stacking-a-wall',
+        autoComplete: true,
+        ready: bramWallDone,
+        track: bramTrackWall,
+        nodeIds: ['mult.equal-groups-total', 'mult.repeated-groups'],
+        lines: {
+          approach: () => "Mind your feet — wall's going up. Five stones to a row, every row. Stand and watch if you like; I talk while I work.",
+          grant: () => "Fourth row. Twenty stones in that wall, and I never once counted past five. That's how you get a wall up before dark.",
+        },
+      },
+      {
+        id: 'bram.floor-a-room',
+        trigger: { type: 'contexts-done', ids: ['bram.stacking-a-wall'] },
+        grantsItem: STONE,
+        grantCount: BRAM_FLOOR_HEAP,
+        nodeIds: ['area.tiling'],
+        lines: {
+          approach: () => "Store-room's next — that sunk patch behind me. It wants stone laid edge to edge, and my back's had enough for one day. Would you?",
+          grant: () => "Here's a heap off the pile. Walk the patch before you start, if you like — I always want to know what a floor will swallow before I lay the first stone.",
+        },
+      },
+      {
+        id: 'bram.floor-laid',
+        trigger: { type: 'contexts-done', ids: ['bram.floor-a-room'] },
+        ready: bramFloorLaid,
+        nodeIds: ['area.tiling', 'area.as-multiplication'],
+        lines: {
+          nudge: () => "There's still earth showing in that floor. Stone, edge to edge — come and find me when it's covered.",
+          grant: bramFloorLaidLine,
         },
       },
     ],

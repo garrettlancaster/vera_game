@@ -27,8 +27,8 @@ future legibility surfaces (Slice 2's stock/rate, and later) follow the same sha
 |---|---|---|---|
 | A | Module refactor — split `game.js` into `client/` ES modules (`DEV_HANDOFF.md` §3) | client | **done** |
 | 1 | **Legibility — the Range Rod** (a tool: distance + vertical scale, earned from a helper NPC) | client | **done** |
-| 2 | Legibility — "stock" & "rate" readouts (carried totals; hunger projection) | client | next |
-| 3 | Social channel — first NPC who *reasons while doing* (a builder) | client render + Phoenix gen | blocked: pending character copy |
+| 2 | Legibility — "stock" & "rate" readouts (carried totals; hunger projection) | client | **done** |
+| 3 | Social channel — first NPC who *reasons while doing* (a builder) | client render + Phoenix gen | **Contexts 1–2 done client-only** (draft copy, needs a human tone pass); 3–5 open |
 | 4 | Economy — proportion wiring (yield-vs-meals; build cost *derived, not looked up*) | client + Phoenix | — |
 | 5 | Adaptive engine — behavior-event stream, rung/mastery state, transitions | **Phoenix** | — |
 | 6 | Challenge channel — a few hand-built goals that *require* reasoning | client + Phoenix | — |
@@ -409,6 +409,35 @@ echoes "about 20".
 
 ---
 
+## Slice 3 — Bram, Contexts 1–2  *(client-only; 3–5 not started)*
+
+Bram is a third settler in `quest-data.js` (ring radius 26), with a real work
+site from the new `entities/npc/sites.js` (a levelled yard, a wall strip, a
+sunken 6×4 store-room). Engine additions are generic — see `DEV_HANDOFF.md` §5.
+
+- `bram.stacking-a-wall` (`mult.equal-groups-total`, `mult.repeated-groups`):
+  he lays a 5-wide wall a stone at a time while the player is within 12
+  blocks, remarking per row; completes by itself, nothing to click.
+- `bram.floor-a-room` → `bram.floor-laid` (`area.tiling`,
+  `area.as-multiplication`): he hands over 30 stone for a floor that takes 24;
+  the size is only ever the room itself. Report-back echoes rows and leftover,
+  ungraded.
+- Copy was drafted here, not supplied — flagged in `DEV_HANDOFF.md` §10.
+- `scripts/check_traceability.mjs` added (`DEV_HANDOFF.md` §9).
+
+**Verified (scripted playtest, default world, no console errors):** approach
+line; all 20 wall stones and all four row lines; auto-complete, then the floor
+ask after the 5s hold; 30 stone granted; nudge on an early ask; real
+right-click placements land as floor (19 of 24 cells in the final run);
+report-back line and all three contexts complete.
+**Not verified:** paving all 24 cells by real input in one run — the script's
+walker couldn't reach the far side, so the last 5 cells were set directly. The
+run also spent ~10 stray stones (the harness's press fires before its re-aim),
+so the "left over" count seen was 1, not 6. Contexts 3–5 are not built;
+Context 4 needs a design call (all blocks are cubes).
+
+---
+
 ## Slices 3+ — where Elixir/Phoenix enters
 
 - **Slice 3 (Social channel):** a builder NPC who *reasons out loud while working*
@@ -429,6 +458,7 @@ echoes "about 20".
 
 ```sh
 node server.mjs                        # static server, http://127.0.0.1:8321
+node scripts/check_traceability.mjs     # quest-data.js node ids vs SKILL_HIERARCHY.md
 node --check client/**/*.js client/*.js   # syntax gate after any client/ edit (post-Slice A;
                                            # game.js no longer exists — see Slice A's log above)
 ```
